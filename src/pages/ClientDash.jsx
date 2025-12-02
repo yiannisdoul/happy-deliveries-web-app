@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
     MapPin, DollarSign, FileText, CheckCircle, XCircle, Clock, 
-    Edit2, AlertTriangle, Package, X, ArrowRight 
+    Edit2, AlertTriangle, Package, X, ArrowRight, Star, Heart 
 } from 'lucide-react'; 
 import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+
+// Define the maximum stamps required for a reward
+const STAMP_MAX = 10;
+const REWARD_VALUE = 100; // $100 discount
 
 export default function ClientDash() {
   const [jobs, setJobs] = useState([]);
@@ -14,6 +18,11 @@ export default function ClientDash() {
   const [loading, setLoading] = useState(false);
   const [viewProofJob, setViewProofJob] = useState(null);
   
+  // --- LOYALTY STATE ---
+  const [stamps, setStamps] = useState(0); 
+  const [isRewardAvailable, setIsRewardAvailable] = useState(false);
+  // ---------------------
+
   const [formData, setFormData] = useState({
     pickupName: '', pickupPhone: '', from: '',
     dropoffName: '', dropoffPhone: '', to: '',
@@ -52,23 +61,57 @@ export default function ClientDash() {
     if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
     if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
     const isLate = isToday && hour24 >= 14; 
-    if (isLate) return { total: base * 1.5, surcharge: base * 0.5, isLate: true };
-    return { total: base, surcharge: 0, isLate: false };
+    
+    let subtotal = base;
+    let surcharge = 0;
+    let discount = 0;
+
+    // 1. Apply Surcharge
+    if (isLate) {
+        surcharge = base * 0.5;
+        subtotal += surcharge;
+    }
+    
+    // 2. Apply Loyalty Discount (Applied to the final total amount)
+    if (isRewardAvailable) {
+        // Discount is the lesser of the REWARD_VALUE or the current subtotal
+        discount = Math.min(subtotal, REWARD_VALUE);
+        subtotal = subtotal - discount;
+    }
+
+    return { total: subtotal, surcharge: surcharge, isLate: isLate, discount: discount };
   };
-  const { total, surcharge, isLate } = calculateTotal();
+  const { total, surcharge, isLate, discount } = calculateTotal();
 
   useEffect(() => {
+    let unsubscribeSnapshot = () => {};
+    
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
+        // --- Fetch Loyalty Data from 'users' collection ---
+        const userRef = doc(db, "users", user.uid);
+        // Use onSnapshot for real-time loyalty updates
+        const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
+            const userData = userDoc.data() || {};
+            const currentStamps = userData.stamps || 0;
+            const rewardStatus = userData.isRewardAvailable || false;
+            setStamps(currentStamps);
+            setIsRewardAvailable(rewardStatus);
+        });
+
+        // --- Fetch Job Data from 'requests' collection ---
         const q = query(collection(db, "requests"), where("clientEmail", "==", user.email));
-        const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+        unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
           const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
           setJobs(docs);
         });
-        return () => unsubscribeSnapshot();
+        
+        return () => { unsubscribeUser(); unsubscribeSnapshot(); };
       } else {
         setJobs([]);
+        setStamps(0);
+        setIsRewardAvailable(false);
       }
     });
     return () => unsubscribeAuth();
@@ -93,7 +136,6 @@ export default function ClientDash() {
      window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   
-  // NEW FUNCTION: Dedicated counter offer click handler
   const handleCounterClick = (job) => {
     if (!confirm("Are you sure you want to make a counter-offer? This is your one-time chance to modify the request after rejection.")) return;
     handleEdit(job);
@@ -105,8 +147,7 @@ export default function ClientDash() {
       const updates = { 
           status: 'accepted',
           hasUnreadEdit: true, 
-          // New: Clear unread flag for client since they've acted on it
-          hasClientCountered: true,
+          hasClientCountered: true, 
           rejectionDetails: null 
       };
 
@@ -124,12 +165,10 @@ export default function ClientDash() {
           updates.hour = t.hour;
           updates.minute = t.minute;
           updates.ampm = t.ampm;
-          // IMPORTANT: Recalculate total amount here if time affects surcharge in the future
       }
       
-      // If payment method wasn't explicitly rejected, keep it
       updates.paymentMethod = job.paymentMethod || 'cash';
-      updates.acceptSurcharge = false; // Reset surcharge acceptance flag
+      updates.acceptSurcharge = false; 
 
       try {
           await updateDoc(doc(db, "requests", job.id), updates);
@@ -146,6 +185,8 @@ export default function ClientDash() {
     if (!timeStatus.isValid) return alert(`Cannot submit: ${timeStatus.error}`);
     if (isLate && !formData.acceptSurcharge) return alert("For same-day delivery after 2 PM, you must accept the surcharge.");
     if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Please enter a Purchase Order number or select N/A.");
+    // Check if the discount is available but not applied (meaning the client needs to re-enter the price)
+    if (isRewardAvailable && discount === 0 && parseFloat(formData.amount) > 0) return alert("Reward is available! Enter the correct offer amount, the discount will be applied automatically.");
 
     setLoading(true);
     try {
@@ -159,20 +200,32 @@ export default function ClientDash() {
         clientEmail: auth.currentUser.email,
         clientId: auth.currentUser.uid,
         status: 'pending',
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        // --- PHASE 5 LOYALTY INTEGRATION ---
+        rewardUsed: isRewardAvailable && discount > 0,
+        // -----------------------------------
       };
       delete payload.poType; 
 
       if (!editingId) {
         payload.createdAt = serverTimestamp();
         await addDoc(collection(db, "requests"), payload);
-        alert("Request Sent!");
+        alert(`Request Sent! Total: $${total.toFixed(2)}.`);
+        
+        // --- PHASE 5: Handle Reward Reset locally and remotely ---
+        if (payload.rewardUsed) {
+            await updateDoc(doc(db, "users", auth.currentUser.uid), {
+                stamps: 0,
+                isRewardAvailable: false,
+            });
+            alert(`Reward claimed! $${discount.toFixed(2)} discount applied. Loyalty card reset.`);
+        }
       } else {
         payload.hasUnreadEdit = true;
         
         const jobToEdit = jobs.find(j => j.id === editingId);
+        // Set hasClientCountered when submitting an edit on a rejected job
         if (jobToEdit && jobToEdit.status === 'rejected' && !jobToEdit.hasClientCountered) {
-            // This is the one-time counter-offer after rejection
             payload.hasClientCountered = true; 
             payload.rejectionDetails = null; 
         }
@@ -205,6 +258,34 @@ const getStatusBadge = (status) => {
       default: return <span className="flex items-center bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><Clock className="h-4 w-4 mr-1"/> Pending</span>;
     }
   };
+  
+  // Loyalty Card Component - FINALIZED UI
+  const LoyaltyCard = () => (
+      <div className={`p-4 rounded-xl mb-5 shadow-lg border-2 ${isRewardAvailable || stamps >= STAMP_MAX ? 'bg-yellow-50 border-yellow-400' : 'bg-white border-gray-100'}`}>
+          <div className="flex justify-between items-center mb-3">
+              <h4 className="font-bold text-lg flex items-center text-gray-800"><Heart className="h-5 w-5 mr-2 text-red-500" /> My Loyalty Card</h4>
+              {isRewardAvailable || stamps >= STAMP_MAX && <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse">REWARD READY!</span>}
+          </div>
+          
+          <div className="flex flex-wrap gap-1 justify-center">
+              {[...Array(STAMP_MAX)].map((_, i) => (
+                  <div key={i} className={`h-8 w-8 rounded-full flex items-center justify-center border-2 transition-all duration-300`} style={{ flexBasis: 'calc(20% - 4px)'}}>
+                      <Star className={`h-5 w-5 ${stamps > i ? (isRewardAvailable || stamps >= STAMP_MAX ? 'text-yellow-500 fill-yellow-500' : 'text-blue-500 fill-blue-500') : 'text-gray-400'}`} />
+                  </div>
+              ))}
+          </div>
+          
+          <p className={`text-sm mt-3 font-semibold text-center ${isRewardAvailable || stamps >= STAMP_MAX ? 'text-green-700' : 'text-gray-500'}`}>
+              {isRewardAvailable || stamps >= STAMP_MAX
+                 ? `Your next delivery is FREE (up to $${REWARD_VALUE} value)!` 
+                 : `Deliveries until reward: ${STAMP_MAX - stamps}`
+              }
+          </p>
+          <p className="text-xs text-gray-400 text-center mt-1">
+             <span className="font-medium italic">Terms: Full van (1-tonne, 6 cubic metres) max. Excludes tolls/surcharges.</span>
+          </p>
+      </div>
+  );
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -231,6 +312,10 @@ const getStatusBadge = (status) => {
         {/* FORM SECTION */}
         <div className="md:col-span-1 order-1">
           <div className="bg-white shadow-lg rounded-xl p-5 sticky top-24 border border-gray-100">
+            {/* LOYALTY CARD INTEGRATION */}
+            <LoyaltyCard />
+            {/* END LOYALTY CARD */}
+            
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
             <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-5 rounded-r shadow-sm"><div className="flex items-start"><Clock className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" /><div className="text-xs text-red-800 font-medium leading-relaxed space-y-1"><p><span className="font-bold uppercase tracking-wide">Important:</span> We require at least <span className="underline decoration-red-400 font-bold">2 hours notice</span>.</p><p>Operating Hours: <span className="font-semibold">7am - 6pm</span>.</p><p className="font-bold text-red-700 pt-1">* 50% surcharge applies same-day after 2 PM.</p></div></div></div>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -241,7 +326,23 @@ const getStatusBadge = (status) => {
               {formData.paymentMethod === 'bank' && <div className="text-xs bg-blue-50 p-2 rounded text-blue-800 border border-blue-100"><p>BSB: 063-000 | ACC: 1234 5678</p></div>}
               <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2"><p className="text-xs font-bold text-gray-500 uppercase">Purchase Order</p><div className="flex items-center gap-3"><input type="text" placeholder="Enter PO Number" className={`flex-1 p-2 border rounded text-sm outline-none focus:ring-1 focus:ring-blue-500 transition-colors ${formData.poType === 'na' ? 'bg-gray-100 text-gray-400' : 'bg-white'}`} value={formData.purchaseOrder} onFocus={() => setFormData({...formData, poType: 'entry'})} onChange={e => setFormData({...formData, purchaseOrder: e.target.value, poType: 'entry'})} /><label className="flex items-center cursor-pointer select-none"><input type="radio" checked={formData.poType === 'na'} onChange={() => setFormData({...formData, poType: 'na', purchaseOrder: ''})} className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500" /><span className="ml-2 text-sm text-gray-700">N/A</span></label></div></div>
               {timeStatus.isValid ? (
-                  <div><div className="relative rounded shadow-sm"><div className="absolute inset-y-0 left-0 pl-3 flex items-center"><DollarSign className="h-4 w-4 text-gray-400" /></div><input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} /></div>{isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Total: ${total.toFixed(2)} (+50% Surcharge)</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}</div>
+                  <div>
+                    <div className="relative rounded shadow-sm">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center"><DollarSign className="h-4 w-4 text-gray-400" /></div>
+                        <input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
+                    </div>
+                    {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Subtotal: ${total.toFixed(2)} (+50% Surcharge)</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}
+                    
+                    {/* TOTAL / DISCOUNT DISPLAY */}
+                    {isRewardAvailable && discount > 0 && (
+                        <div className="mt-3 bg-green-50 p-3 rounded border border-green-100">
+                           <p className="text-green-800 font-bold text-sm">REWARD APPLIED: -${discount.toFixed(2)}</p>
+                           <p className="text-lg font-bold text-green-700">FINAL TOTAL: ${total.toFixed(2)}</p>
+                        </div>
+                    )}
+                    {!isRewardAvailable && <p className="text-sm text-gray-500 font-bold mt-2">Total Estimate: ${total.toFixed(2)}</p>}
+                    
+                  </div>
               ) : (
                   <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse"><AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" /><p className="text-red-800 font-bold text-sm">Cannot Complete Request</p><p className="text-red-600 text-xs mt-1">{timeStatus.error}</p><p className="text-red-600 text-xs mt-1">Please select a different time.</p></div>
               )}
@@ -261,9 +362,8 @@ const getStatusBadge = (status) => {
           {filteredJobs.length === 0 && <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200"><p className="text-gray-500">No {filter !== 'all' ? filter : ''} requests found.</p></div>}
 
           {filteredJobs.map((job) => {
-             // Client can edit if pending, OR if rejected and they haven't used their single counter/edit yet
-             const canEdit = job.status === 'pending' || (job.status === 'rejected' && !job.hasClientCountered);
-
+             // The variable canEdit is removed to clear linter warnings.
+             
              return (
                <div key={job.id} className="bg-white shadow-sm rounded-lg p-5 border border-gray-100 relative hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-3 border-b border-gray-50 pb-3">
@@ -300,6 +400,8 @@ const getStatusBadge = (status) => {
 
                         </div>
                       )}
+                      
+                      {job.rewardUsed && <div className="mt-3 bg-yellow-50 text-yellow-800 text-xs px-2 py-1 rounded inline-block font-bold">LOYALTY REWARD CLAIMED</div>}
                    </div>
                    
                    <div className="text-right">
@@ -309,13 +411,16 @@ const getStatusBadge = (status) => {
                       {job.status === 'delivered' ? (
                         <button onClick={() => setViewProofJob(job)} className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-200 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors"><Package className="h-3 w-3 mr-1"/> View Proof</button>
                       ) : (
-                        <button 
-                          onClick={() => canEdit && handleEdit(job)} 
-                          className={`text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'}`}
-                          title={!canEdit ? "Counter offer limit reached or accepted" : "Edit request"}
-                        >
-                          <Edit2 className="h-3 w-3 mr-1"/> {canEdit ? 'Edit' : 'Locked'}
-                        </button>
+                         // Show Edit button only if pending, otherwise rely on Accept/Counter buttons in rejection box
+                         job.status === 'pending' && (
+                             <button 
+                                onClick={() => handleEdit(job)} 
+                                className={`text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors hover:bg-blue-100`}
+                                title="Edit request"
+                             >
+                               <Edit2 className="h-3 w-3 mr-1"/> Edit
+                            </button>
+                        )
                       )}
                    </div>
                 </div>

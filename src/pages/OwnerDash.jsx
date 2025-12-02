@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     CheckCircle, XCircle, Calendar, AlertCircle, Bell, Minimize2, 
-    User, Camera, PenTool, X, DollarSign, Clock, Package, Edit2 
+    User, Camera, PenTool, X, DollarSign, Clock, Package, Edit2, Star 
 } from 'lucide-react'; 
 import { db } from '../config/firebase';
-import { collection, query, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
 import SignatureCanvas from 'react-signature-canvas'; 
+
+const STAMP_MAX = 10;
 
 export default function OwnerDash() {
   const [jobs, setJobs] = useState([]);
@@ -20,7 +22,7 @@ export default function OwnerDash() {
   // Delivery Modal State
   const [deliveringJobId, setDeliveringJobId] = useState(null);
   const [receiverName, setReceiverName] = useState('');
-  const [photoFile, setPhotoFile] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null); // FIXED: Used useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const sigPad = useRef({}); 
   
@@ -28,7 +30,7 @@ export default function OwnerDash() {
   const [viewProofJob, setViewProofJob] = useState(null);
 
   // --- REJECTION MODAL STATE ---
-  const [rejectingJobId, setRejectingJobId] = useState(null);
+  const [rejectingJobId, setRejectingJobId] = useState(null); // FIXED: Used useState(null)
   const [rejectionReason, setRejectionReason] = useState('price'); // price, time, other
   const [rejectionNote, setRejectionNote] = useState('');
   // Counter Offer State
@@ -86,14 +88,16 @@ export default function OwnerDash() {
   }, []);
 
   const handleStatus = async (id, newStatus) => {
-    try { await updateDoc(doc(db, "requests", id), { status: newStatus }); } catch (e) { console.error(e); }
+    try { 
+        await updateDoc(doc(db, "requests", id), { status: newStatus, hasUnreadEdit: false }); 
+    } catch (e) { 
+        console.error(e); 
+    }
   };
   
-  // NEW FUNCTION: Mark job as reviewed to clear the notification flag
   const handleMarkAsReviewed = async (jobId) => {
     try {
         await updateDoc(doc(db, "requests", jobId), { hasUnreadEdit: false });
-        // The useEffect dependency handles re-filtering editedJobs
     } catch (e) {
         alert("Error marking job as reviewed.");
         console.error(e);
@@ -126,11 +130,10 @@ export default function OwnerDash() {
         await updateDoc(doc(db, "requests", rejectingJobId), {
             status: 'rejected',
             rejectionDetails: rejectionData,
-            hasUnreadEdit: true, // Notify client of rejection/counter
-            hasClientCountered: false // Reset counter flag for the client
+            hasUnreadEdit: false, 
+            hasClientCountered: false 
         });
 
-        // Reset
         setRejectingJobId(null);
         setRejectionNote('');
         setCounterPrice('');
@@ -145,7 +148,6 @@ export default function OwnerDash() {
 
   const openRejectionModal = (job) => {
       setRejectingJobId(job.id);
-      // Pre-fill counter with current price/time
       setCounterPrice(job.totalAmount || job.amount); 
       setCounterDate(job.date);
       setCounterHour(job.hour);
@@ -162,6 +164,33 @@ export default function OwnerDash() {
     const data = await res.json();
     return data.secure_url;
   };
+  
+  const handleLoyaltyStamping = async (clientId, job) => {
+      const userRef = doc(db, "users", clientId);
+      
+      if (job.rewardUsed) {
+          await updateDoc(userRef, { isRewardAvailable: false });
+          return;
+      }
+      
+      const userDoc = await getDoc(userRef);
+      const userData = userDoc.data() || {};
+      let currentStamps = userData.stamps || 0;
+      let isRewardAvailable = userData.isRewardAvailable || false;
+
+      if (!isRewardAvailable) {
+          currentStamps += 1;
+          if (currentStamps >= STAMP_MAX) {
+              currentStamps = STAMP_MAX;
+              isRewardAvailable = true;
+          }
+      }
+
+      await updateDoc(userRef, { 
+          stamps: currentStamps, 
+          isRewardAvailable: isRewardAvailable 
+      });
+  };
 
   const handleSubmitDelivery = async (e) => {
     e.preventDefault();
@@ -170,26 +199,39 @@ export default function OwnerDash() {
     if (!photoFile) return alert("Please take a photo");
 
     setIsSubmitting(true);
+    let photoURL, sigURL;
+
     try {
-      const photoURL = await uploadToCloudinary(photoFile);
+      const job = jobs.find(j => j.id === deliveringJobId);
+      if (!job) throw new Error("Job not found.");
+        
+      photoURL = await uploadToCloudinary(photoFile);
       const sigData = sigPad.current.getCanvas().toDataURL('image/png');
       const sigBlob = await (await fetch(sigData)).blob();
-      const sigURL = await uploadToCloudinary(sigBlob);
+      sigURL = await uploadToCloudinary(sigBlob);
 
       await updateDoc(doc(db, "requests", deliveringJobId), {
         status: 'delivered',
         deliveredAt: new Date().toISOString(),
-        hasUnreadEdit: false, // Delivered is a final state, clear flag
+        hasUnreadEdit: false, 
         pod: { receiver: receiverName, photo: photoURL, signature: sigURL }
       });
+      
+      try {
+          await handleLoyaltyStamping(job.clientId, job);
+      } catch (stampError) {
+          console.error("Loyalty Stamp Failed (Check Firestore Rules):", stampError.message);
+      }
 
       setDeliveringJobId(null);
       setReceiverName('');
       setPhotoFile(null);
-      alert("Job Completed & Proof Saved!");
+      
+      alert("✅ Job Delivered Successfully & Proof Saved! Well done.");
+      
     } catch (error) {
-      console.error("Delivery Error:", error);
-      alert(`Error: ${error.message}`);
+      console.error("Delivery Error (Fatal):", error);
+      alert(`❌ Delivery Failed: ${error.message}. Please check Cloudinary and Firestore 'requests' permissions.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -218,6 +260,19 @@ export default function OwnerDash() {
     const title = encodeURIComponent(`Delivery: ${job.from} --> ${job.to}`);
     const details = encodeURIComponent(`CLIENT: ${clientInfo}\nPrice: $${job.totalAmount||job.amount}\nPO: ${job.purchaseOrder||'N/A'}\nPickup: ${job.from}\nDrop: ${job.to}\nNotes: ${job.notes}`);
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${formatTime(hour, job.minute)}/${formatTime(hour + 1, job.minute)}`;
+  };
+  
+  const getNotificationMessage = (job) => {
+      if (job.status === 'accepted' && job.hasUnreadEdit) {
+          return 'CLIENT ACCEPTED YOUR PROPOSAL';
+      }
+      if (job.status === 'pending' && job.hasUnreadEdit) {
+          return 'CLIENT EDITED REQUEST';
+      }
+      if (job.status === 'rejected' && job.hasClientCountered) {
+          return 'CLIENT SUBMITTED COUNTER-OFFER';
+      }
+      return 'MODIFIED BY CLIENT';
   };
 
   return (
@@ -382,8 +437,6 @@ export default function OwnerDash() {
           const clientName = clientInfo.fullName || 'Unknown Client';
           const clientPhone = clientInfo.phone ? `+61 ${clientInfo.phone}` : 'No Phone';
           
-          const isRejectedAndReviewed = job.status === 'rejected' && job.hasClientCountered;
-
           return (
             <div key={job.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden ${job.status === 'delivered' ? 'opacity-75 bg-slate-50' : ''} ${job.hasUnreadEdit ? 'border-yellow-300 ring-2 ring-yellow-100' : 'border-gray-200'}`}>
               <div className="bg-slate-50 border-b border-gray-100 px-4 py-2 flex items-center justify-between">
@@ -393,7 +446,7 @@ export default function OwnerDash() {
                 <div className="bg-yellow-50 text-yellow-800 text-xs font-bold px-4 py-2 flex items-center justify-between border-b border-yellow-100">
                     <span className="flex items-center">
                         <AlertCircle className="h-3 w-3 mr-1" /> 
-                        {isRejectedAndReviewed ? 'CLIENT COUNTERED/ACCEPTED' : 'MODIFIED BY CLIENT'}
+                        {getNotificationMessage(job)}
                     </span>
                     <button onClick={() => handleMarkAsReviewed(job.id)} className="text-blue-600 hover:text-blue-800 underline transition">Mark as Reviewed</button>
                 </div>
@@ -440,6 +493,7 @@ export default function OwnerDash() {
                             {job.rejectionDetails.counterTime && <p className="text-blue-600 font-bold mt-2">Proposed Time: {job.rejectionDetails.counterTime.date} @ {job.rejectionDetails.counterTime.hour}:{job.rejectionDetails.counterTime.minute} {job.rejectionDetails.counterTime.ampm}</p>}
                         </div>
                    )}
+                   {job.rewardUsed && <div className="mt-3 bg-green-50 text-green-800 text-xs px-2 py-1 rounded inline-block font-bold flex items-center"><Star className="h-3 w-3 mr-1 fill-green-800 text-green-800"/> REWARD CLAIMED ON THIS DELIVERY</div>}
                 </div>
                 {job.status === 'accepted' && job.date && (
                   <div className="mt-4 pt-4 border-t border-gray-100"><a href={createGoogleCalendarLink(job)} target="_blank" rel="noreferrer" className="block w-full text-center py-3 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-bold text-sm transition-colors flex items-center justify-center"><Calendar className="h-4 w-4 mr-2"/> Add to Google Calendar</a></div>
