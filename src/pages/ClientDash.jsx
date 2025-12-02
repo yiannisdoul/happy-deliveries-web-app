@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, DollarSign, FileText, CheckCircle, XCircle, Clock, Edit2, AlertTriangle, Package } from 'lucide-react'; 
+import { MapPin, DollarSign, FileText, CheckCircle, XCircle, Clock, Edit2, AlertTriangle, Package, X } from 'lucide-react'; 
 import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 export default function ClientDash() {
   const [jobs, setJobs] = useState([]);
+  const [filter, setFilter] = useState('all'); // Filter State
   const [editingId, setEditingId] = useState(null); 
   const [loading, setLoading] = useState(false);
-  // Modal for Viewing Proof
   const [viewProofJob, setViewProofJob] = useState(null);
   
   const [formData, setFormData] = useState({
@@ -19,6 +19,12 @@ export default function ClientDash() {
     hour: '10', minute: '00', ampm: 'AM',
     acceptSurcharge: false,
     purchaseOrder: '', poType: 'entry'    
+  });
+
+  // --- FILTER LOGIC ---
+  const filteredJobs = jobs.filter(job => {
+    if (filter === 'all') return true;
+    return job.status === filter;
   });
 
   const getTimeValidation = () => {
@@ -147,42 +153,53 @@ export default function ClientDash() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       
-      {/* PROOF MODAL */}
+      {/* RESPONSIVE PROOF MODAL */}
       {viewProofJob && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={() => setViewProofJob(null)}>
-           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4 text-gray-900 border-b pb-2">Proof of Delivery</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={() => setViewProofJob(null)}>
+           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center p-4 border-b bg-gray-50">
+                 <h3 className="text-lg font-bold text-gray-900 flex items-center">
+                    <Package className="h-5 w-5 mr-2 text-blue-600"/> Proof of Delivery
+                 </h3>
+                 <button onClick={() => setViewProofJob(null)} className="text-gray-400 hover:text-gray-600">
+                    <X className="h-6 w-6" />
+                 </button>
+              </div>
               
-              <div className="space-y-4">
-                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                    <p className="text-xs text-gray-500 uppercase font-bold mb-1">Received By</p>
-                    <p className="text-lg font-bold text-gray-800">{viewProofJob.pod?.receiver || 'Unknown'}</p>
+              <div className="p-6 overflow-y-auto space-y-6">
+                 <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Received By</label>
+                    <p className="text-xl font-bold text-gray-800">{viewProofJob.pod?.receiver || 'Unknown'}</p>
                  </div>
 
                  {viewProofJob.pod?.photo && (
                    <div>
-                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">Photo Evidence</p>
-                      <img src={viewProofJob.pod.photo} alt="Delivery" className="w-full rounded-lg border border-gray-300" />
+                      <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Photo Evidence</label>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                        <img src={viewProofJob.pod.photo} alt="Delivery" className="w-full object-cover" />
+                      </div>
                    </div>
                  )}
 
                  {viewProofJob.pod?.signature && (
                    <div>
-                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">Signature</p>
-                      <div className="border border-gray-200 rounded-lg p-2 bg-white">
-                        <img src={viewProofJob.pod.signature} alt="Signature" className="w-full h-24 object-contain" />
+                      <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Signature</label>
+                      <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 flex justify-center">
+                        <img src={viewProofJob.pod.signature} alt="Signature" className="h-24 object-contain" />
                       </div>
                    </div>
                  )}
               </div>
 
-              <button onClick={() => setViewProofJob(null)} className="mt-6 w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg transition">Close</button>
+              <div className="p-4 border-t bg-gray-50 text-center text-xs text-gray-400">
+                 Delivered at: {new Date(viewProofJob.deliveredAt).toLocaleString()}
+              </div>
            </div>
         </div>
       )}
 
       <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
-        {/* FORM SECTION */}
+        {/* FORM */}
         <div className="md:col-span-1 order-1">
           <div className="bg-white shadow-lg rounded-xl p-5 sticky top-24 border border-gray-100">
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center">
@@ -261,9 +278,26 @@ export default function ClientDash() {
 
         {/* LIST SECTION */}
         <div className="md:col-span-2 order-2 space-y-4">
-          <h3 className="text-xl font-bold text-gray-900">My Requests ({jobs.length})</h3>
-          {jobs.length === 0 && <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200"><p className="text-gray-500">No requests yet. Create one to get started!</p></div>}
-          {jobs.map((job) => (
+          <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
+             <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
+             
+             {/* FILTER PILLS */}
+             <div className="flex bg-gray-100 p-1 rounded-lg space-x-1">
+                {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
+                   <button 
+                     key={status} 
+                     onClick={() => setFilter(status)}
+                     className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                   >
+                     {status}
+                   </button>
+                ))}
+             </div>
+          </div>
+          
+          {filteredJobs.length === 0 && <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200"><p className="text-gray-500">No {filter !== 'all' ? filter : ''} requests found.</p></div>}
+
+          {filteredJobs.map((job) => (
              <div key={job.id} className="bg-white shadow-sm rounded-lg p-5 border border-gray-100 relative hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-3 border-b border-gray-50 pb-3">
                    <div>{getStatusBadge(job.status)}</div>
@@ -279,8 +313,6 @@ export default function ClientDash() {
                    <div className="text-right">
                       <p className="font-bold text-2xl text-blue-600">${job.totalAmount || job.amount}</p>
                       <p className="text-xs text-gray-400 capitalize mb-2">{job.paymentMethod}</p>
-                      
-                      {/* VIEW PROOF BUTTON (If Delivered) */}
                       {job.status === 'delivered' ? (
                         <button onClick={() => setViewProofJob(job)} className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-200 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors">
                           <Package className="h-3 w-3 mr-1"/> View Proof

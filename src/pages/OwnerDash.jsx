@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CheckCircle, XCircle, Calendar, AlertCircle, Bell, Minimize2, User, Camera, PenTool } from 'lucide-react'; 
+import { CheckCircle, XCircle, Calendar, AlertCircle, Bell, Minimize2, User, Camera, PenTool, Filter, Package, X } from 'lucide-react'; 
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
 import SignatureCanvas from 'react-signature-canvas'; 
@@ -7,34 +7,39 @@ import SignatureCanvas from 'react-signature-canvas';
 export default function OwnerDash() {
   const [jobs, setJobs] = useState([]);
   const [clientMap, setClientMap] = useState({});
+  const [filter, setFilter] = useState('all'); // Filter State
+  
   const [editedJobs, setEditedJobs] = useState([]);
   const [showNotification, setShowNotification] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
-  // Delivery Modal State
   const [deliveringJobId, setDeliveringJobId] = useState(null);
   const [receiverName, setReceiverName] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const sigPad = useRef({}); 
+  
+  // VIEW PROOF MODAL STATE
+  const [viewProofJob, setViewProofJob] = useState(null);
 
-  // --- CLOUDINARY CONFIG (Safe Method) ---
-  // Ensure these exist in your .env file
   const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+  // --- FILTER LOGIC ---
+  const filteredJobs = jobs.filter(job => {
+    if (filter === 'all') return true;
+    return job.status === filter;
+  });
 
   useEffect(() => {
     const q = query(collection(db, "requests"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
       docs.sort((a, b) => {
-        // Sort Order: Pending -> Accepted -> Delivered -> Rejected
         const statusOrder = { pending: 1, accepted: 2, delivered: 3, rejected: 4 };
         const statusDiff = (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
         if (statusDiff !== 0) return statusDiff;
-        // Then by Newest
         return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
       });
       setJobs(docs);
@@ -69,23 +74,16 @@ export default function OwnerDash() {
     try { await updateDoc(doc(db, "requests", id), { status: newStatus }); } catch (e) { console.error(e); }
   };
 
-  // --- HELPER: UPLOAD TO CLOUDINARY ---
   const uploadToCloudinary = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', UPLOAD_PRESET);
-
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-      method: 'POST',
-      body: formData
-    });
-    
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('Upload failed');
     const data = await res.json();
     return data.secure_url;
   };
 
-  // --- HANDLE DELIVERY SUBMISSION ---
   const handleSubmitDelivery = async (e) => {
     e.preventDefault();
     if (!receiverName) return alert("Please enter receiver's name");
@@ -94,35 +92,24 @@ export default function OwnerDash() {
 
     setIsSubmitting(true);
     try {
-      // 1. Upload Photo
       const photoURL = await uploadToCloudinary(photoFile);
-
-      // 2. Upload Signature 
-      // FIX: Use getCanvas() instead of getTrimmedCanvas() to prevent crash
-      const sigData = sigPad.current.getCanvas().toDataURL('image/png');
+      const sigData = sigPad.current.getTrimmedCanvas().toDataURL('image/png');
       const sigBlob = await (await fetch(sigData)).blob();
       const sigURL = await uploadToCloudinary(sigBlob);
 
-      // 3. Update Firestore
       await updateDoc(doc(db, "requests", deliveringJobId), {
         status: 'delivered',
         deliveredAt: new Date().toISOString(),
-        pod: {
-          receiver: receiverName,
-          photo: photoURL,
-          signature: sigURL
-        }
+        pod: { receiver: receiverName, photo: photoURL, signature: sigURL }
       });
 
       setDeliveringJobId(null);
       setReceiverName('');
       setPhotoFile(null);
       alert("Job Completed & Proof Saved!");
-
     } catch (error) {
       console.error("Delivery Error:", error);
-      // Detailed error alert for debugging
-      alert(`Error: ${error.message}`);
+      alert("Failed to upload proof.");
     } finally {
       setIsSubmitting(false);
     }
@@ -144,19 +131,28 @@ export default function OwnerDash() {
     if (job.ampm === 'PM' && hour !== 12) hour += 12;
     if (job.ampm === 'AM' && hour === 12) hour = 0;
     const formatTime = (h, m) => `${job.date.replace(/-/g, '')}T${h.toString().padStart(2, '0')}${m}00`;
-    
     const client = clientMap[job.clientId] || {};
     const phoneDisplay = client.phone ? `+61 ${client.phone}` : 'No Phone';
     const clientInfo = `${client.fullName || 'Unknown'} (${phoneDisplay})`;
     const title = encodeURIComponent(`Delivery: ${job.from} --> ${job.to}`);
     const details = encodeURIComponent(`CLIENT: ${clientInfo}\nPrice: $${job.totalAmount||job.amount}\nPO: ${job.purchaseOrder||'N/A'}\nPickup: ${job.from}\nDrop: ${job.to}\nNotes: ${job.notes}`);
-    
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${formatTime(hour, job.minute)}/${formatTime(hour + 1, job.minute)}`;
   };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 relative min-h-screen pb-24">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Owner Dashboard</h1>
+      
+      {/* FILTER HEADER */}
+      <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+        <h1 className="text-2xl font-bold text-gray-900">Owner Dashboard</h1>
+        <div className="flex bg-gray-100 p-1 rounded-lg space-x-1 overflow-x-auto w-full sm:w-auto">
+            {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
+                <button key={status} onClick={() => setFilter(status)} className={`px-4 py-2 rounded-md text-xs font-bold capitalize transition-all whitespace-nowrap ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {status}
+                </button>
+            ))}
+        </div>
+      </div>
       
       {/* DELIVERY MODAL */}
       {deliveringJobId && (
@@ -167,30 +163,29 @@ export default function OwnerDash() {
                  <button onClick={() => setDeliveringJobId(null)} className="text-gray-400 hover:text-gray-600"><XCircle /></button>
               </div>
               <form onSubmit={handleSubmitDelivery} className="space-y-4">
-                 <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Receiver Name</label>
-                    <input required type="text" placeholder="Who accepted the package?" className="w-full border border-gray-300 rounded-lg p-2" value={receiverName} onChange={e => setReceiverName(e.target.value)} />
-                 </div>
-                 <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Proof Photo</label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 relative">
-                       <input type="file" accept="image/*" capture="environment" onChange={e => setPhotoFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                       <div className="flex flex-col items-center justify-center text-gray-500">
-                          {photoFile ? <div className="text-green-600 font-bold flex items-center"><CheckCircle className="h-5 w-5 mr-1"/> Photo Selected</div> : <><Camera className="h-8 w-8 mb-1" /><span className="text-sm">Tap to take photo</span></>}
-                       </div>
-                    </div>
-                 </div>
-                 <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Signature</label>
-                    <div className="border border-gray-300 rounded-lg bg-gray-50">
-                       <SignatureCanvas ref={sigPad} penColor='black' canvasProps={{width: 320, height: 150, className: 'sigCanvas mx-auto'}} backgroundColor="#f9fafb" />
-                    </div>
-                    <button type="button" onClick={() => sigPad.current.clear()} className="text-xs text-red-500 underline mt-1">Clear Signature</button>
-                 </div>
-                 <button type="submit" disabled={isSubmitting} className="w-full bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 shadow-lg flex items-center justify-center">
-                   {isSubmitting ? <span>Uploading...</span> : <><CheckCircle className="h-5 w-5 mr-2" /> Mark as Delivered</>}
-                 </button>
+                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Receiver Name</label><input required type="text" placeholder="Who accepted the package?" className="w-full border border-gray-300 rounded-lg p-2" value={receiverName} onChange={e => setReceiverName(e.target.value)} /></div>
+                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Proof Photo</label><div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 relative"><input type="file" accept="image/*" capture="environment" onChange={e => setPhotoFile(e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" /><div className="flex flex-col items-center justify-center text-gray-500">{photoFile ? <div className="text-green-600 font-bold flex items-center"><CheckCircle className="h-5 w-5 mr-1"/> Photo Selected</div> : <><Camera className="h-8 w-8 mb-1" /><span className="text-sm">Tap to take photo</span></>}</div></div></div>
+                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Signature</label><div className="border border-gray-300 rounded-lg bg-gray-50"><SignatureCanvas ref={sigPad} penColor='black' canvasProps={{width: 320, height: 150, className: 'sigCanvas mx-auto'}} backgroundColor="#f9fafb" /></div><button type="button" onClick={() => sigPad.current.clear()} className="text-xs text-red-500 underline mt-1">Clear Signature</button></div>
+                 <button type="submit" disabled={isSubmitting} className="w-full bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 shadow-lg flex items-center justify-center">{isSubmitting ? <span>Uploading...</span> : <><CheckCircle className="h-5 w-5 mr-2" /> Mark as Delivered</>}</button>
               </form>
+           </div>
+        </div>
+      )}
+
+      {/* VIEW PROOF MODAL (FOR OWNER) */}
+      {viewProofJob && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={() => setViewProofJob(null)}>
+           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 border-b pb-2">
+                 <h3 className="text-lg font-bold text-gray-900 flex items-center"><Package className="h-5 w-5 mr-2 text-blue-600"/> Proof of Delivery</h3>
+                 <button onClick={() => setViewProofJob(null)} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
+              </div>
+              <div className="space-y-4">
+                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200"><p className="text-xs text-gray-500 uppercase font-bold mb-1">Received By</p><p className="text-lg font-bold text-gray-800">{viewProofJob.pod?.receiver || 'Unknown'}</p></div>
+                 {viewProofJob.pod?.photo && <div><p className="text-xs text-gray-500 uppercase font-bold mb-1">Photo Evidence</p><img src={viewProofJob.pod.photo} alt="Delivery" className="w-full rounded-lg border border-gray-300" /></div>}
+                 {viewProofJob.pod?.signature && <div><p className="text-xs text-gray-500 uppercase font-bold mb-1">Signature</p><div className="border border-gray-200 rounded-lg p-2 bg-white"><img src={viewProofJob.pod.signature} alt="Signature" className="w-full h-24 object-contain" /></div></div>}
+              </div>
+              <div className="mt-4 text-center text-xs text-gray-400">Completed: {new Date(viewProofJob.deliveredAt).toLocaleString()}</div>
            </div>
         </div>
       )}
@@ -231,10 +226,10 @@ export default function OwnerDash() {
       )}
 
       {/* JOBS LIST */}
-      {jobs.length === 0 && <div className="text-center py-12 text-gray-400 bg-gray-50 rounded-xl border-2 border-dashed">No requests found.</div>}
+      {filteredJobs.length === 0 && <div className="text-center py-12 text-gray-400 bg-gray-50 rounded-xl border-2 border-dashed">No {filter !== 'all' ? filter : ''} requests found.</div>}
 
       <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2">
-        {jobs.map((job) => {
+        {filteredJobs.map((job) => {
           const clientInfo = clientMap[job.clientId] || {};
           const clientName = clientInfo.fullName || 'Unknown Client';
           const clientPhone = clientInfo.phone ? `+61 ${clientInfo.phone}` : 'No Phone';
@@ -257,7 +252,15 @@ export default function OwnerDash() {
                   ) : job.status === 'accepted' ? (
                     <div className="flex flex-col items-end gap-2"><span className="px-3 py-1 text-xs rounded-full font-bold uppercase bg-green-100 text-green-800">Accepted</span><button onClick={() => setDeliveringJobId(job.id)} className="flex items-center bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-blue-700"><PenTool className="h-3 w-3 mr-1" /> Complete</button></div>
                   ) : (
-                    <span className={`px-3 py-1 text-xs rounded-full font-bold uppercase ${job.status === 'delivered' ? 'bg-slate-200 text-slate-600' : 'bg-red-100 text-red-800'}`}>{job.status}</span>
+                    <div className="flex flex-col items-end gap-2">
+                        <span className={`px-3 py-1 text-xs rounded-full font-bold uppercase ${job.status === 'delivered' ? 'bg-slate-200 text-slate-600' : 'bg-red-100 text-red-800'}`}>{job.status}</span>
+                        {/* OWNER VIEW PROOF BUTTON */}
+                        {job.status === 'delivered' && (
+                            <button onClick={() => setViewProofJob(job)} className="flex items-center bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                                <Package className="h-3 w-3 mr-1" /> Proof
+                            </button>
+                        )}
+                    </div>
                   )}
                 </div>
                 <div className="mt-4 space-y-3 border-t border-gray-100 pt-3">
