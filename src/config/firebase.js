@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage'; // Added this
 
-// We use import.meta.env to access variables in Vite
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -12,17 +12,17 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
 let app;
 let auth;
 let db;
+let storage; 
 
 try {
-  // Check if keys are present to avoid crashing during build/test
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app); // Initialize Storage
   } else {
     console.warn("Firebase config keys are missing. Check your .env file.");
   }
@@ -30,4 +30,4 @@ try {
   console.error("Firebase initialization error:", error);
 }
 
-export { auth, db };
+export { auth, db, storage };

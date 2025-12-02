@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, DollarSign, FileText, CheckCircle, XCircle, Clock, Edit2, AlertTriangle, FileInput } from 'lucide-react'; 
+import { MapPin, DollarSign, FileText, CheckCircle, XCircle, Clock, Edit2, AlertTriangle, Package } from 'lucide-react'; 
 import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -8,6 +8,8 @@ export default function ClientDash() {
   const [jobs, setJobs] = useState([]);
   const [editingId, setEditingId] = useState(null); 
   const [loading, setLoading] = useState(false);
+  // Modal for Viewing Proof
+  const [viewProofJob, setViewProofJob] = useState(null);
   
   const [formData, setFormData] = useState({
     pickupName: '', pickupPhone: '', from: '',
@@ -16,52 +18,37 @@ export default function ClientDash() {
     date: new Date().toISOString().split('T')[0],
     hour: '10', minute: '00', ampm: 'AM',
     acceptSurcharge: false,
-    purchaseOrder: '', 
-    poType: 'entry'    
+    purchaseOrder: '', poType: 'entry'    
   });
 
-  // --- TIME VALIDATION ---
   const getTimeValidation = () => {
     let hour24 = parseInt(formData.hour);
     if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
     if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
-
     const [year, month, day] = formData.date.split('-').map(Number);
     const bookingTime = new Date(year, month - 1, day, hour24, parseInt(formData.minute));
     const now = new Date();
-    
     const diffMs = bookingTime - now;
     const diffHours = diffMs / (1000 * 60 * 60);
-
     if (diffMs < 0) return { isValid: false, error: "Time cannot be in the past." };
     if (diffHours < 2) return { isValid: false, error: "Too Soon: We require at least 2 hours notice." };
     if (hour24 >= 18 || hour24 < 7) return { isValid: false, error: "Closed: We operate between 7:00 AM and 6:00 PM." };
-
     return { isValid: true, error: null };
   };
-
   const timeStatus = getTimeValidation();
 
-  // --- SURCHARGE CALC ---
   const calculateTotal = () => {
     const base = parseFloat(formData.amount) || 0;
     const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
-    
     let hour24 = parseInt(formData.hour);
     if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
     if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
-
     const isLate = isToday && hour24 >= 14; 
-    
-    if (isLate) {
-      return { total: base * 1.5, surcharge: base * 0.5, isLate: true };
-    }
+    if (isLate) return { total: base * 1.5, surcharge: base * 0.5, isLate: true };
     return { total: base, surcharge: 0, isLate: false };
   };
-
   const { total, surcharge, isLate } = calculateTotal();
 
-  // --- FETCH JOBS ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -81,9 +68,7 @@ export default function ClientDash() {
 
   const handlePhoneInput = (val, field) => {
     const numericOnly = val.replace(/\D/g, '');
-    if (numericOnly.length <= 9) {
-      setFormData(prev => ({ ...prev, [field]: numericOnly }));
-    }
+    if (numericOnly.length <= 9) setFormData(prev => ({ ...prev, [field]: numericOnly }));
   };
 
   const handleEdit = (job) => {
@@ -101,20 +86,15 @@ export default function ClientDash() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (formData.pickupPhone.length < 9) return alert("Pickup Phone must be 9 digits.");
     if (formData.dropoffPhone.length < 9) return alert("Dropoff Phone must be 9 digits.");
     if (!timeStatus.isValid) return alert(`Cannot submit: ${timeStatus.error}`);
     if (isLate && !formData.acceptSurcharge) return alert("For same-day delivery after 2 PM, you must accept the surcharge.");
-    
-    if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) {
-        return alert("Please enter a Purchase Order number or select N/A.");
-    }
+    if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Please enter a Purchase Order number or select N/A.");
 
     setLoading(true);
     try {
       const finalPO = formData.poType === 'na' ? "N/A" : formData.purchaseOrder;
-
       const payload = {
         ...formData,
         purchaseOrder: finalPO,
@@ -126,7 +106,6 @@ export default function ClientDash() {
         status: 'pending',
         updatedAt: serverTimestamp()
       };
-      
       delete payload.poType; 
 
       if (!editingId) {
@@ -139,7 +118,6 @@ export default function ClientDash() {
         alert("Request Updated!");
         setEditingId(null);
       }
-      
       setFormData({
         pickupName: '', pickupPhone: '', from: '',
         dropoffName: '', dropoffPhone: '', to: '',
@@ -161,14 +139,49 @@ export default function ClientDash() {
     switch(status) {
       case 'accepted': return <span className="flex items-center bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><CheckCircle className="h-4 w-4 mr-1"/> Accepted</span>;
       case 'rejected': return <span className="flex items-center bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><XCircle className="h-4 w-4 mr-1"/> Rejected</span>;
+      case 'delivered': return <span className="flex items-center bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><Package className="h-4 w-4 mr-1"/> Delivered</span>;
       default: return <span className="flex items-center bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><Clock className="h-4 w-4 mr-1"/> Pending</span>;
     }
   };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
+      
+      {/* PROOF MODAL */}
+      {viewProofJob && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={() => setViewProofJob(null)}>
+           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4 text-gray-900 border-b pb-2">Proof of Delivery</h3>
+              
+              <div className="space-y-4">
+                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <p className="text-xs text-gray-500 uppercase font-bold mb-1">Received By</p>
+                    <p className="text-lg font-bold text-gray-800">{viewProofJob.pod?.receiver || 'Unknown'}</p>
+                 </div>
+
+                 {viewProofJob.pod?.photo && (
+                   <div>
+                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">Photo Evidence</p>
+                      <img src={viewProofJob.pod.photo} alt="Delivery" className="w-full rounded-lg border border-gray-300" />
+                   </div>
+                 )}
+
+                 {viewProofJob.pod?.signature && (
+                   <div>
+                      <p className="text-xs text-gray-500 uppercase font-bold mb-1">Signature</p>
+                      <div className="border border-gray-200 rounded-lg p-2 bg-white">
+                        <img src={viewProofJob.pod.signature} alt="Signature" className="w-full h-24 object-contain" />
+                      </div>
+                   </div>
+                 )}
+              </div>
+
+              <button onClick={() => setViewProofJob(null)} className="mt-6 w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg transition">Close</button>
+           </div>
+        </div>
+      )}
+
       <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
-        
         {/* FORM SECTION */}
         <div className="md:col-span-1 order-1">
           <div className="bg-white shadow-lg rounded-xl p-5 sticky top-24 border border-gray-100">
@@ -176,7 +189,6 @@ export default function ClientDash() {
               <FileText className="h-5 w-5 mr-2" />
               {editingId ? "Edit Request" : "New Delivery"}
             </h3>
-
             <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-5 rounded-r shadow-sm">
                <div className="flex items-start">
                   <Clock className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
@@ -191,30 +203,16 @@ export default function ClientDash() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
                   <p className="text-xs font-bold text-gray-500 uppercase">Pickup From</p>
-                  <input required placeholder="Contact Name" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" 
-                    value={formData.pickupName} onChange={e => setFormData({...formData, pickupName: e.target.value})} />
-                  <div className="flex rounded shadow-sm">
-                    <span className="inline-flex items-center px-3 rounded-l border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-sm">+61</span>
-                    <input type="text" inputMode="numeric" required placeholder="4XX XXX XXX" className="flex-1 w-full px-3 py-2 rounded-r border border-gray-300 text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                      value={formData.pickupPhone} onChange={e => handlePhoneInput(e.target.value, 'pickupPhone')} />
-                  </div>
-                  <input required placeholder="Address (From)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" 
-                    value={formData.from} onChange={e => setFormData({...formData, from: e.target.value})} />
+                  <input required placeholder="Contact Name" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.pickupName} onChange={e => setFormData({...formData, pickupName: e.target.value})} />
+                  <div className="flex rounded shadow-sm"><span className="inline-flex items-center px-3 rounded-l border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-sm">+61</span><input type="text" inputMode="numeric" required placeholder="4XX XXX XXX" className="flex-1 w-full px-3 py-2 rounded-r border border-gray-300 text-sm outline-none focus:ring-1 focus:ring-blue-500" value={formData.pickupPhone} onChange={e => handlePhoneInput(e.target.value, 'pickupPhone')} /></div>
+                  <input required placeholder="Address (From)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.from} onChange={e => setFormData({...formData, from: e.target.value})} />
               </div>
-
               <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
                   <p className="text-xs font-bold text-gray-500 uppercase">Dropoff To</p>
-                  <input required placeholder="Contact Name" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" 
-                    value={formData.dropoffName} onChange={e => setFormData({...formData, dropoffName: e.target.value})} />
-                  <div className="flex rounded shadow-sm">
-                    <span className="inline-flex items-center px-3 rounded-l border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-sm">+61</span>
-                    <input type="text" inputMode="numeric" required placeholder="4XX XXX XXX" className="flex-1 w-full px-3 py-2 rounded-r border border-gray-300 text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                      value={formData.dropoffPhone} onChange={e => handlePhoneInput(e.target.value, 'dropoffPhone')} />
-                  </div>
-                  <input required placeholder="Address (To)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" 
-                    value={formData.to} onChange={e => setFormData({...formData, to: e.target.value})} />
+                  <input required placeholder="Contact Name" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.dropoffName} onChange={e => setFormData({...formData, dropoffName: e.target.value})} />
+                  <div className="flex rounded shadow-sm"><span className="inline-flex items-center px-3 rounded-l border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-sm">+61</span><input type="text" inputMode="numeric" required placeholder="4XX XXX XXX" className="flex-1 w-full px-3 py-2 rounded-r border border-gray-300 text-sm outline-none focus:ring-1 focus:ring-blue-500" value={formData.dropoffPhone} onChange={e => handlePhoneInput(e.target.value, 'dropoffPhone')} /></div>
+                  <input required placeholder="Address (To)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.to} onChange={e => setFormData({...formData, to: e.target.value})} />
               </div>
-
               <div className="flex flex-col gap-2">
                   <label className="text-xs font-bold text-gray-500 uppercase mt-1">Date & Time</label>
                   <input type="date" required className="w-full p-2 border rounded text-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
@@ -224,43 +222,20 @@ export default function ClientDash() {
                      <select className="flex-1 p-2 border rounded text-sm bg-white" value={formData.ampm} onChange={e => setFormData({...formData, ampm: e.target.value})}><option>AM</option><option>PM</option></select>
                   </div>
               </div>
-
               <div className="flex gap-2 mt-2">
                  {['cash', 'bank'].map((m) => (
-                    <div key={m} onClick={() => setFormData({...formData, paymentMethod: m})}
-                      className={`flex-1 p-2 rounded border cursor-pointer flex items-center justify-between text-sm ${formData.paymentMethod === m ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
-                       <span className="capitalize">{m}</span>
-                       {formData.paymentMethod === m && <div className="h-4 w-4 bg-green-500 rounded-full flex items-center justify-center"><CheckCircle className="h-3 w-3 text-white" /></div>}
+                    <div key={m} onClick={() => setFormData({...formData, paymentMethod: m})} className={`flex-1 p-2 rounded border cursor-pointer flex items-center justify-between text-sm ${formData.paymentMethod === m ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                       <span className="capitalize">{m}</span>{formData.paymentMethod === m && <div className="h-4 w-4 bg-green-500 rounded-full flex items-center justify-center"><CheckCircle className="h-3 w-3 text-white" /></div>}
                     </div>
                  ))}
               </div>
               {formData.paymentMethod === 'bank' && <div className="text-xs bg-blue-50 p-2 rounded text-blue-800 border border-blue-100"><p>BSB: 063-000 | ACC: 1234 5678</p></div>}
-
-              {/* --- UPDATED PURCHASE ORDER SECTION --- */}
+              
               <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
                   <p className="text-xs font-bold text-gray-500 uppercase">Purchase Order</p>
                   <div className="flex items-center gap-3">
-                      {/* Text Box */}
-                      <input 
-                          type="text" 
-                          placeholder="Enter PO Number"
-                          className={`flex-1 p-2 border rounded text-sm outline-none focus:ring-1 focus:ring-blue-500 transition-colors ${formData.poType === 'na' ? 'bg-gray-100 text-gray-400' : 'bg-white'}`}
-                          value={formData.purchaseOrder} 
-                          // Clicking or typing here automatically sets mode to 'entry'
-                          onFocus={() => setFormData({...formData, poType: 'entry'})}
-                          onChange={e => setFormData({...formData, purchaseOrder: e.target.value, poType: 'entry'})} 
-                      />
-                      
-                      {/* N/A Radio */}
-                      <label className="flex items-center cursor-pointer select-none">
-                          <input 
-                              type="radio" 
-                              checked={formData.poType === 'na'}
-                              onChange={() => setFormData({...formData, poType: 'na', purchaseOrder: ''})}
-                              className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                          />
-                          <span className="ml-2 text-sm text-gray-700">N/A</span>
-                      </label>
+                      <input type="text" placeholder="Enter PO Number" className={`flex-1 p-2 border rounded text-sm outline-none focus:ring-1 focus:ring-blue-500 transition-colors ${formData.poType === 'na' ? 'bg-gray-100 text-gray-400' : 'bg-white'}`} value={formData.purchaseOrder} onFocus={() => setFormData({...formData, poType: 'entry'})} onChange={e => setFormData({...formData, purchaseOrder: e.target.value, poType: 'entry'})} />
+                      <label className="flex items-center cursor-pointer select-none"><input type="radio" checked={formData.poType === 'na'} onChange={() => setFormData({...formData, poType: 'na', purchaseOrder: ''})} className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500" /><span className="ml-2 text-sm text-gray-700">N/A</span></label>
                   </div>
               </div>
 
@@ -268,34 +243,18 @@ export default function ClientDash() {
                   <div>
                       <div className="relative rounded shadow-sm">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center"><DollarSign className="h-4 w-4 text-gray-400" /></div>
-                        <input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" 
-                          value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
+                        <input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
                       </div>
-                      {isLate && (
-                        <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100">
-                          <p className="font-bold">Total: ${total.toFixed(2)} (+50% Surcharge)</p>
-                          <label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label>
-                        </div>
-                      )}
+                      {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Total: ${total.toFixed(2)} (+50% Surcharge)</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}
                   </div>
               ) : (
-                  <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse">
-                     <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
-                     <p className="text-red-800 font-bold text-sm">Cannot Complete Request</p>
-                     <p className="text-red-600 text-xs mt-1">{timeStatus.error}</p>
-                     <p className="text-red-600 text-xs mt-1">Please select a different time.</p>
-                  </div>
+                  <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse"><AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" /><p className="text-red-800 font-bold text-sm">Cannot Complete Request</p><p className="text-red-600 text-xs mt-1">{timeStatus.error}</p><p className="text-red-600 text-xs mt-1">Please select a different time.</p></div>
               )}
-
               <div>
                  <label className="text-xs text-gray-500 font-bold mb-1 block">Notes <span className="font-normal lowercase">(what is being delivered?)</span></label>
                  <textarea required className="w-full border rounded p-2 text-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
               </div>
-
-              <button type="submit" disabled={loading || !timeStatus.isValid} 
-                className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${!timeStatus.isValid ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                 {loading ? 'Processing...' : (editingId ? 'Update Request' : 'Submit Request')}
-              </button>
+              <button type="submit" disabled={loading || !timeStatus.isValid} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${!timeStatus.isValid ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>{loading ? 'Processing...' : (editingId ? 'Update Request' : 'Submit Request')}</button>
             </form>
           </div>
         </div>
@@ -303,40 +262,34 @@ export default function ClientDash() {
         {/* LIST SECTION */}
         <div className="md:col-span-2 order-2 space-y-4">
           <h3 className="text-xl font-bold text-gray-900">My Requests ({jobs.length})</h3>
-          
-          {jobs.length === 0 && (
-             <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
-               <p className="text-gray-500">No requests yet. Create one to get started!</p>
-             </div>
-          )}
-
+          {jobs.length === 0 && <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200"><p className="text-gray-500">No requests yet. Create one to get started!</p></div>}
           {jobs.map((job) => (
              <div key={job.id} className="bg-white shadow-sm rounded-lg p-5 border border-gray-100 relative hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-3 border-b border-gray-50 pb-3">
                    <div>{getStatusBadge(job.status)}</div>
-                   <p className="text-sm font-bold text-gray-800 flex items-center">
-                     <Clock className="h-3 w-3 mr-1 text-gray-400"/>
-                     {job.date ? <span>{job.date} @ {job.hour}:{job.minute} {job.ampm}</span> : <span>Undated</span>}
-                   </p>
+                   <p className="text-sm font-bold text-gray-800 flex items-center"><Clock className="h-3 w-3 mr-1 text-gray-400"/>{job.date ? <span>{job.date} @ {job.hour}:{job.minute} {job.ampm}</span> : <span>Undated</span>}</p>
                 </div>
-                
                 <div className="flex justify-between items-end">
                    <div className="space-y-1">
                       <p className="text-sm text-gray-600 flex items-center"><MapPin className="h-3 w-3 mr-1 text-blue-400"/> <span className="font-semibold text-gray-700 w-12">From:</span> {job.from}</p>
                       <p className="text-sm text-gray-600 flex items-center"><MapPin className="h-3 w-3 mr-1 text-orange-400"/> <span className="font-semibold text-gray-700 w-12">To:</span> {job.to}</p>
                       <p className="text-xs text-gray-500 flex items-center"><FileText className="h-3 w-3 mr-1"/> PO: <span className="font-medium ml-1">{job.purchaseOrder || 'N/A'}</span></p>
-                      
-                      <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block">
-                         <p className="text-xs text-gray-600">Item: <span className="italic">{job.notes}</span></p>
-                      </div>
+                      <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block"><p className="text-xs text-gray-600">Item: <span className="italic">{job.notes}</span></p></div>
                    </div>
-                   
                    <div className="text-right">
                       <p className="font-bold text-2xl text-blue-600">${job.totalAmount || job.amount}</p>
                       <p className="text-xs text-gray-400 capitalize mb-2">{job.paymentMethod}</p>
-                      <button onClick={() => handleEdit(job)} className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors">
-                        <Edit2 className="h-3 w-3 mr-1"/> Edit
-                      </button>
+                      
+                      {/* VIEW PROOF BUTTON (If Delivered) */}
+                      {job.status === 'delivered' ? (
+                        <button onClick={() => setViewProofJob(job)} className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-200 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors">
+                          <Package className="h-3 w-3 mr-1"/> View Proof
+                        </button>
+                      ) : (
+                        <button onClick={() => handleEdit(job)} className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors">
+                          <Edit2 className="h-3 w-3 mr-1"/> Edit
+                        </button>
+                      )}
                    </div>
                 </div>
              </div>
