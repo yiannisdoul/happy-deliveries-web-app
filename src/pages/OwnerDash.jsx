@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     CheckCircle, XCircle, Calendar, AlertCircle, Bell, Minimize2, 
-    User, Camera, PenTool, X, DollarSign, Clock, Package, Edit2, Star 
+    User, Camera, PenTool, X, DollarSign, Clock, Package, Edit2, Star, ArrowRight 
 } from 'lucide-react'; 
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
@@ -22,7 +22,7 @@ export default function OwnerDash() {
   // Delivery Modal State
   const [deliveringJobId, setDeliveringJobId] = useState(null);
   const [receiverName, setReceiverName] = useState('');
-  const [photoFile, setPhotoFile] = useState(null); // FIXED: Used useState(null)
+  const [photoFile, setPhotoFile] = useState(null); 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const sigPad = useRef({}); 
   
@@ -30,7 +30,7 @@ export default function OwnerDash() {
   const [viewProofJob, setViewProofJob] = useState(null);
 
   // --- REJECTION MODAL STATE ---
-  const [rejectingJobId, setRejectingJobId] = useState(null); // FIXED: Used useState(null)
+  const [rejectingJobId, setRejectingJobId] = useState(null); 
   const [rejectionReason, setRejectionReason] = useState('price'); // price, time, other
   const [rejectionNote, setRejectionNote] = useState('');
   // Counter Offer State
@@ -47,6 +47,36 @@ export default function OwnerDash() {
     if (filter === 'all') return true;
     return job.status === filter;
   });
+  
+  const handleMinimize = () => {
+      if (editedJobs.length > 0) {
+          setShowNotification(false); // Hide the full modal
+          setIsMinimized(true); // Show the minimized icon
+      } else {
+          setShowNotification(false);
+          setIsMinimized(false);
+      }
+  };
+  
+  // FIXED: Removed the automatic call to handleMarkAsReviewed(jobId)
+  const handleNavigateToJob = (jobId) => {
+      const element = document.getElementById(`job-${jobId}`);
+      if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          
+          // Optionally flash the job card for visual feedback
+          element.classList.add('animate-ping-once'); 
+          setTimeout(() => {
+              element.classList.remove('animate-ping-once');
+          }, 1500);
+
+          // Notification persistence: The flag is NOT cleared here.
+          
+          // Minimize the full modal if it's open, but leave the counter tab open
+          setShowNotification(false);
+          setIsMinimized(true);
+      }
+  };
 
   useEffect(() => {
     const q = query(collection(db, "requests"));
@@ -63,15 +93,22 @@ export default function OwnerDash() {
       const unread = docs.filter(job => job.hasUnreadEdit === true);
       if (unread.length > 0) {
         setEditedJobs(unread);
-        setShowNotification(true);
-        setIsMinimized(false); 
+        if (!dontShowAgain) {
+            // Restore visibility if new updates arrive while minimized
+            if (isMinimized) {
+                setShowNotification(false); 
+            } else {
+                setShowNotification(true); 
+            }
+        }
       } else {
         setEditedJobs([]);
         setShowNotification(false);
+        setIsMinimized(false);
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [isMinimized, dontShowAgain]); 
 
   useEffect(() => {
     const fetchClients = async () => {
@@ -169,26 +206,25 @@ export default function OwnerDash() {
       const userRef = doc(db, "users", clientId);
       
       if (job.rewardUsed) {
-          await updateDoc(userRef, { isRewardAvailable: false });
           return;
       }
       
       const userDoc = await getDoc(userRef);
       const userData = userDoc.data() || {};
+      
       let currentStamps = userData.stamps || 0;
-      let isRewardAvailable = userData.isRewardAvailable || false;
-
-      if (!isRewardAvailable) {
-          currentStamps += 1;
-          if (currentStamps >= STAMP_MAX) {
-              currentStamps = STAMP_MAX;
-              isRewardAvailable = true;
-          }
+      let currentRewards = userData.rewardCount || 0;
+      
+      currentStamps += 1;
+      
+      if (currentStamps >= STAMP_MAX) {
+          currentRewards += 1;
+          currentStamps = 0;
       }
 
       await updateDoc(userRef, { 
           stamps: currentStamps, 
-          isRewardAvailable: isRewardAvailable 
+          rewardCount: currentRewards,
       });
   };
 
@@ -238,6 +274,7 @@ export default function OwnerDash() {
   };
 
   const handleCloseNotification = async () => {
+    // This is the full close, triggered by the bulk checkbox
     if (dontShowAgain && editedJobs.length > 0) {
       try {
         const promises = editedJobs.map(job => updateDoc(doc(db, "requests", job.id), { hasUnreadEdit: false }));
@@ -246,6 +283,7 @@ export default function OwnerDash() {
     }
     setShowNotification(false);
     setDontShowAgain(false);
+    setIsMinimized(false); 
   };
 
   const createGoogleCalendarLink = (job) => {
@@ -266,11 +304,14 @@ export default function OwnerDash() {
       if (job.status === 'accepted' && job.hasUnreadEdit) {
           return 'CLIENT ACCEPTED YOUR PROPOSAL';
       }
+      if (job.status === 'pending' && job.hasUnreadEdit && job.hasClientCountered) {
+          return 'CLIENT SUBMITTED COUNTER-OFFER';
+      }
       if (job.status === 'pending' && job.hasUnreadEdit) {
           return 'CLIENT EDITED REQUEST';
       }
-      if (job.status === 'rejected' && job.hasClientCountered) {
-          return 'CLIENT SUBMITTED COUNTER-OFFER';
+      if (job.status === 'rejected' && job.hasUnreadEdit) { 
+          return 'CLIENT RE-EDITED REJECTED REQUEST';
       }
       return 'MODIFIED BY CLIENT';
   };
@@ -287,6 +328,38 @@ export default function OwnerDash() {
             ))}
         </div>
       </div>
+
+      {/* NEW: PERSISTENT UPDATES TAB / LIST */}
+      {editedJobs.length > 0 && (
+          <div className="bg-white shadow-lg rounded-xl p-5 mb-6 border border-yellow-300">
+              <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                  <Bell className="h-5 w-5 mr-2 text-yellow-600 animate-pulse"/> Pending Updates ({editedJobs.length})
+                  <span className="text-xs font-normal text-gray-500 ml-3">Click to view details.</span>
+              </h3>
+              <div className="space-y-3">
+                  {editedJobs.slice(0, 5).map(job => (
+                      <div 
+                          key={job.id} 
+                          id={`update-tab-${job.id}`}
+                          onClick={() => handleNavigateToJob(job.id)}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100 cursor-pointer hover:bg-yellow-50 transition"
+                      >
+                          <div className="text-sm font-medium">
+                              <span className="text-gray-700">{clientMap[job.clientId]?.fullName || 'Unknown'}</span>: 
+                              <span className="text-yellow-800 font-semibold ml-2">{getNotificationMessage(job)}</span>
+                          </div>
+                          <span className="text-xs text-blue-600 hover:underline flex items-center">
+                              View Job <ArrowRight className="h-3 w-3 ml-1" />
+                          </span>
+                      </div>
+                  ))}
+                  {editedJobs.length > 5 && (
+                      <p className="text-sm text-gray-500 mt-2 text-center">... and {editedJobs.length - 5} more updates.</p>
+                  )}
+              </div>
+          </div>
+      )}
+
 
       {/* --- REJECTION MODAL --- */}
       {rejectingJobId && (
@@ -393,39 +466,62 @@ export default function OwnerDash() {
         </div>
       )}
 
-      {/* NOTIFICATION MODAL */}
-      {showNotification && (
+      {/* NOTIFICATION MODAL (Full Screen) */}
+      {showNotification && !isMinimized && (
         <>
-          {!isMinimized ? (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
               <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 animate-fade-in-up border-l-8 border-yellow-400 max-h-[85vh] flex flex-col">
                 <div className="flex justify-between items-start mb-4 flex-shrink-0">
-                  <div className="flex items-center text-yellow-600"><AlertCircle className="h-6 w-6 mr-2" /><h3 className="text-lg font-bold text-gray-900">Job Updates</h3></div>
-                  <button onClick={() => setIsMinimized(true)} className="p-2 -mr-2 text-gray-400 hover:text-gray-600"><Minimize2 className="h-5 w-5" /></button>
+                  <div className="flex items-center text-yellow-600"><AlertCircle className="h-6 w-6 mr-2" /><h3 className="text-lg font-bold text-gray-900">Job Updates ({editedJobs.length})</h3></div>
+                  {/* CHANGED: Minimize button calls the new handleMinimize function */}
+                  <button onClick={handleMinimize} className="p-2 -mr-2 text-gray-400 hover:text-gray-600" title="Minimize Message"><Minimize2 className="h-5 w-5" /></button> 
                 </div>
                 <div className="overflow-y-auto flex-1 pr-1">
                     <p className="text-gray-600 mb-3 text-sm">The following jobs have been modified.</p>
                     <div className="bg-red-50 text-red-700 text-xs p-3 rounded mb-4 border border-red-100 font-medium">⚠️ IMPORTANT: Update your Calendar entries manually!</div>
+                    
+                    {/* INDIVIDUAL JOB LIST WITH MARK AS REVIEWED */}
                     <ul className="bg-gray-50 rounded-lg p-3 space-y-3 border border-gray-100 mb-4">
                       {editedJobs.map(job => (
-                        <li key={job.id} className="text-sm flex items-start"><span className="h-2 w-2 bg-yellow-500 rounded-full mt-1.5 mr-2 flex-shrink-0"></span><div className="break-words w-full"><span className="font-semibold block">{job.pickupName}</span><span className="text-gray-400 text-xs">to</span><span className="font-semibold block">{job.dropoffName}</span></div></li>
+                        <li key={job.id} className="text-sm flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                            <div className="flex items-start">
+                                <span className="h-2 w-2 bg-yellow-500 rounded-full mt-1.5 mr-2 flex-shrink-0"></span>
+                                <div className="break-words w-full">
+                                    <span className="font-semibold block">{job.pickupName} <ArrowRight className="h-3 w-3 inline text-gray-400 mx-1"/> {job.dropoffName}</span>
+                                    <span className="text-gray-500 text-xs font-medium">{getNotificationMessage(job)}</span>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => handleMarkAsReviewed(job.id)}
+                                className="text-xs text-blue-600 underline hover:text-blue-800 ml-2 flex-shrink-0 whitespace-nowrap"
+                            >
+                                Mark as Read
+                            </button>
+                        </li>
                       ))}
                     </ul>
+                    
+                    {/* Option to clear all on close */}
                     <div className="flex items-start mb-4 bg-blue-50 p-3 rounded cursor-pointer" onClick={() => setDontShowAgain(!dontShowAgain)}>
                       <input type="checkbox" checked={dontShowAgain} onChange={(e) => setDontShowAgain(e.target.checked)} className="mt-0.5 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0" />
-                      <label className="ml-2 text-sm text-blue-800 font-medium cursor-pointer select-none leading-tight">Mark all as read</label>
+                      <label className="ml-2 text-sm text-blue-800 font-medium cursor-pointer select-none leading-tight">Mark all as read when closing</label>
                     </div>
                 </div>
-                <div className="flex-shrink-0 pt-2"><button onClick={handleCloseNotification} className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition shadow-lg">Close Message</button></div>
+                <div className="flex-shrink-0 pt-2">
+                    {/* This button performs the full close action based on the checkbox */}
+                    <button onClick={handleCloseNotification} className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition shadow-lg">Close & Dismiss</button>
+                </div>
               </div>
             </div>
-          ) : (
-            <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 bg-white shadow-2xl rounded-full sm:rounded-lg p-3 sm:p-4 z-50 border-l-0 sm:border-l-4 border-yellow-400 cursor-pointer hover:bg-gray-50 flex items-center gap-3" onClick={() => setIsMinimized(false)}>
-              <div className="bg-yellow-100 p-2 rounded-full relative"><Bell className="h-5 w-5 text-yellow-600" /><span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full animate-ping"></span><span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full"></span></div>
-              <div className="hidden sm:block"><p className="font-bold text-gray-800 text-sm">{editedJobs.length} Updates</p></div>
-            </div>
-          )}
         </>
+      )}
+
+      {/* MINIMIZED BELL ICON VIEW (Bottom Right) */}
+      {isMinimized && editedJobs.length > 0 && (
+          <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 bg-white shadow-2xl rounded-full sm:rounded-lg p-3 sm:p-4 z-50 border-l-0 sm:border-l-4 border-yellow-400 cursor-pointer hover:bg-gray-50 flex items-center gap-3" onClick={() => setIsMinimized(false) || setShowNotification(true)}> {/* Click restores the full modal */}
+            <div className="bg-yellow-100 p-2 rounded-full relative"><Bell className="h-5 w-5 text-yellow-600" /><span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full animate-ping"></span><span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full"></span></div>
+            <div className="hidden sm:block"><p className="font-bold text-gray-800 text-sm">{editedJobs.length} Updates</p></div>
+          </div>
       )}
 
       {/* JOBS LIST */}
@@ -438,7 +534,8 @@ export default function OwnerDash() {
           const clientPhone = clientInfo.phone ? `+61 ${clientInfo.phone}` : 'No Phone';
           
           return (
-            <div key={job.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden ${job.status === 'delivered' ? 'opacity-75 bg-slate-50' : ''} ${job.hasUnreadEdit ? 'border-yellow-300 ring-2 ring-yellow-100' : 'border-gray-200'}`}>
+            // Added ID attribute for scrolling navigation
+            <div key={job.id} id={`job-${job.id}`} className={`bg-white rounded-xl shadow-sm border overflow-hidden ${job.status === 'delivered' ? 'opacity-75 bg-slate-50' : ''} ${job.hasUnreadEdit ? 'border-yellow-300 ring-2 ring-yellow-100' : 'border-gray-200'}`}>
               <div className="bg-slate-50 border-b border-gray-100 px-4 py-2 flex items-center justify-between">
                  <div className="flex items-center text-xs text-slate-500 font-medium"><User className="h-3 w-3 mr-1.5" /><span className="uppercase tracking-wide">Account:</span><span className="ml-2 text-slate-700 font-bold">{clientName}</span><span className="mx-2 text-slate-300">|</span><span className="text-slate-600">{clientPhone}</span></div>
               </div>
@@ -448,6 +545,7 @@ export default function OwnerDash() {
                         <AlertCircle className="h-3 w-3 mr-1" /> 
                         {getNotificationMessage(job)}
                     </span>
+                    {/* Button to mark THIS specific job as read (relies on listener to update the list) */}
                     <button onClick={() => handleMarkAsReviewed(job.id)} className="text-blue-600 hover:text-blue-800 underline transition">Mark as Reviewed</button>
                 </div>
               )}

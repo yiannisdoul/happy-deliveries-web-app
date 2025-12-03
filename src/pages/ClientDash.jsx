@@ -9,7 +9,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 
 // Define the maximum stamps required for a reward
 const STAMP_MAX = 10;
-const REWARD_VALUE = 100; // $100 discount
+const REWARD_VALUE = 100; // $100 discount (Confirmed)
 
 export default function ClientDash() {
   const [jobs, setJobs] = useState([]);
@@ -20,7 +20,8 @@ export default function ClientDash() {
   
   // --- LOYALTY STATE ---
   const [stamps, setStamps] = useState(0); 
-  const [isRewardAvailable, setIsRewardAvailable] = useState(false);
+  const [rewardCount, setRewardCount] = useState(0); // NEW: Track banked rewards
+  const [useRewardOnThisJob, setUseRewardOnThisJob] = useState(false); // NEW: Client selects to use reward
   // ---------------------
 
   const [formData, setFormData] = useState({
@@ -72,16 +73,19 @@ export default function ClientDash() {
         subtotal += surcharge;
     }
     
-    // 2. Apply Loyalty Discount (Applied to the final total amount)
-    if (isRewardAvailable) {
+    // 2. Apply Loyalty Discount if SELECTED AND AVAILABLE
+    // Check if the client selected the reward AND they have at least 1 banked reward
+    if (useRewardOnThisJob && rewardCount > 0) {
         // Discount is the lesser of the REWARD_VALUE or the current subtotal
         discount = Math.min(subtotal, REWARD_VALUE);
         subtotal = subtotal - discount;
     }
 
-    return { total: subtotal, surcharge: surcharge, isLate: isLate, discount: discount };
+    // CRITICAL FIX: Return subtotal to resolve ESLint 'no-undef' error in JSX
+    return { total: subtotal, subtotal: subtotal, surcharge: surcharge, isLate: isLate, discount: discount };
   };
-  const { total, surcharge, isLate, discount } = calculateTotal();
+  // CRITICAL FIX: Destructure subtotal here
+  const { total, subtotal, surcharge, isLate, discount } = calculateTotal();
 
   useEffect(() => {
     let unsubscribeSnapshot = () => {};
@@ -93,10 +97,9 @@ export default function ClientDash() {
         // Use onSnapshot for real-time loyalty updates
         const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
             const userData = userDoc.data() || {};
-            const currentStamps = userData.stamps || 0;
-            const rewardStatus = userData.isRewardAvailable || false;
-            setStamps(currentStamps);
-            setIsRewardAvailable(rewardStatus);
+            setStamps(userData.stamps || 0);
+            setRewardCount(userData.rewardCount || 0); // FETCH NEW FIELD
+            // Old isRewardAvailable logic is removed
         });
 
         // --- Fetch Job Data from 'requests' collection ---
@@ -111,7 +114,8 @@ export default function ClientDash() {
       } else {
         setJobs([]);
         setStamps(0);
-        setIsRewardAvailable(false);
+        setRewardCount(0);
+        setUseRewardOnThisJob(false);
       }
     });
     return () => unsubscribeAuth();
@@ -185,8 +189,11 @@ export default function ClientDash() {
     if (!timeStatus.isValid) return alert(`Cannot submit: ${timeStatus.error}`);
     if (isLate && !formData.acceptSurcharge) return alert("For same-day delivery after 2 PM, you must accept the surcharge.");
     if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Please enter a Purchase Order number or select N/A.");
-    // Check if the discount is available but not applied (meaning the client needs to re-enter the price)
-    if (isRewardAvailable && discount === 0 && parseFloat(formData.amount) > 0) return alert("Reward is available! Enter the correct offer amount, the discount will be applied automatically.");
+    
+    // Check if the discount was selected but no price was entered or total is $0
+    if (useRewardOnThisJob && discount === 0 && parseFloat(formData.amount) > 0) {
+        return alert("Reward is selected, but discount is $0. Ensure you have entered an Offer Amount.");
+    }
 
     setLoading(true);
     try {
@@ -196,14 +203,14 @@ export default function ClientDash() {
         purchaseOrder: finalPO,
         amount: parseFloat(formData.amount),
         surcharge: surcharge,
-        totalAmount: total,
+        totalAmount: total, // Saves the final discounted price
         clientEmail: auth.currentUser.email,
         clientId: auth.currentUser.uid,
         status: 'pending',
         updatedAt: serverTimestamp(),
-        // --- PHASE 5 LOYALTY INTEGRATION ---
-        rewardUsed: isRewardAvailable && discount > 0,
-        // -----------------------------------
+        // --- LOYALTY INTEGRATION: Check if selected and applied ---
+        rewardUsed: useRewardOnThisJob && discount > 0,
+        // -----------------------------------------------------------
       };
       delete payload.poType; 
 
@@ -212,13 +219,15 @@ export default function ClientDash() {
         await addDoc(collection(db, "requests"), payload);
         alert(`Request Sent! Total: $${total.toFixed(2)}.`);
         
-        // --- PHASE 5: Handle Reward Reset locally and remotely ---
+        // --- PHASE 5: Handle Reward DECREMENT (Banked System) ---
         if (payload.rewardUsed) {
             await updateDoc(doc(db, "users", auth.currentUser.uid), {
-                stamps: 0,
-                isRewardAvailable: false,
+                rewardCount: rewardCount - 1, // DECREMENT banked reward
             });
-            alert(`Reward claimed! $${discount.toFixed(2)} discount applied. Loyalty card reset.`);
+            // Reset local state for the form
+            setUseRewardOnThisJob(false); 
+            
+            alert(`Reward claimed! $${discount.toFixed(2)} discount applied. One banked delivery used.`);
         }
       } else {
         payload.hasUnreadEdit = true;
@@ -259,38 +268,58 @@ const getStatusBadge = (status) => {
     }
   };
   
-  // Loyalty Card Component - FINALIZED UI
+  // Loyalty Card Component - UPDATED FOR BANKED REWARDS
   const LoyaltyCard = () => (
-      <div className={`p-4 rounded-xl mb-5 shadow-lg border-2 ${isRewardAvailable || stamps >= STAMP_MAX ? 'bg-yellow-50 border-yellow-400' : 'bg-white border-gray-100'}`}>
+      // Background color is based on having rewards, not stamp count
+      <div className={`p-4 rounded-xl mb-5 shadow-lg border-2 ${rewardCount > 0 ? 'bg-yellow-50 border-yellow-400' : 'bg-white border-gray-100'}`}>
           <div className="flex justify-between items-center mb-3">
               <h4 className="font-bold text-lg flex items-center text-gray-800"><Heart className="h-5 w-5 mr-2 text-red-500" /> My Loyalty Card</h4>
-              {isRewardAvailable || stamps >= STAMP_MAX && <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse">REWARD READY!</span>}
+              {rewardCount > 0 && <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse">REWARDS BANKED!</span>}
           </div>
           
+          {/* Star display logic uses only current stamps */}
           <div className="flex flex-wrap gap-1 justify-center">
               {[...Array(STAMP_MAX)].map((_, i) => (
                   <div key={i} className={`h-8 w-8 rounded-full flex items-center justify-center border-2 transition-all duration-300`} style={{ flexBasis: 'calc(20% - 4px)'}}>
-                      <Star className={`h-5 w-5 ${stamps > i ? (isRewardAvailable || stamps >= STAMP_MAX ? 'text-yellow-500 fill-yellow-500' : 'text-blue-500 fill-blue-500') : 'text-gray-400'}`} />
+                      <Star className={`h-5 w-5 ${stamps > i ? 'text-blue-500 fill-blue-500' : 'text-gray-400'}`} />
                   </div>
               ))}
           </div>
           
-          <p className={`text-sm mt-3 font-semibold text-center ${isRewardAvailable || stamps >= STAMP_MAX ? 'text-green-700' : 'text-gray-500'}`}>
-              {isRewardAvailable || stamps >= STAMP_MAX
-                 ? `Your next delivery is FREE (up to $${REWARD_VALUE} value)!` 
-                 : `Deliveries until reward: ${STAMP_MAX - stamps}`
+          {/* Display Rewards Banked and Stamps Remaining */}
+          <p className={`text-sm mt-3 font-semibold text-center ${rewardCount > 0 ? 'text-green-700' : 'text-gray-500'}`}>
+              {rewardCount > 0 
+                 ? `${rewardCount} Free Delivery${rewardCount > 1 ? 's' : ''} to claim!` // Display banked rewards
+                 : `Deliveries until next reward: ${STAMP_MAX - stamps}`
               }
           </p>
-          <p className="text-xs text-gray-400 text-center mt-1">
-             <span className="font-medium italic">Terms: Full van (1-tonne, 6 cubic metres) max. Excludes tolls/surcharges.</span>
+          <p className="text-xs text-gray-400 text-center mt-1 italic">
+             (You currently have **{stamps}** stamp{stamps !== 1 ? 's' : ''}.)
           </p>
+
+          {/* NEW: REWARD SELECTION TOGGLE */}
+          {rewardCount > 0 && (
+             <div className="mt-4 pt-3 border-t border-gray-100">
+                <label className="flex items-center justify-center cursor-pointer bg-green-100 p-3 rounded-lg hover:bg-green-200 transition">
+                    <input 
+                        type="checkbox" 
+                        checked={useRewardOnThisJob} 
+                        onChange={() => setUseRewardOnThisJob(prev => !prev)} 
+                        className="h-5 w-5 text-green-600 rounded mr-3"
+                    />
+                    <span className="font-bold text-green-800 text-sm">
+                        APPLY BANKED FREE DELIVERY ($100 Discount)
+                    </span>
+                </label>
+             </div>
+          )}
       </div>
   );
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       
-      {/* RESPONSIVE PROOF MODAL */}
+      {/* RESPONSIVE PROOF MODAL (same) */}
       {viewProofJob && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={() => setViewProofJob(null)}>
            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -331,16 +360,22 @@ const getStatusBadge = (status) => {
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center"><DollarSign className="h-4 w-4 text-gray-400" /></div>
                         <input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
                     </div>
-                    {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Subtotal: ${total.toFixed(2)} (+50% Surcharge)</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}
+                    {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100">
+                        {/* FIX: Use subtotal for display before discount */}
+                        <p className="font-bold">Price before discount: ${subtotal.toFixed(2)} (+50% Surcharge)</p>
+                        <label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label>
+                    </div>}
                     
-                    {/* TOTAL / DISCOUNT DISPLAY */}
-                    {isRewardAvailable && discount > 0 && (
+                    {/* DISPLAY LOGIC: Show discount if selected AND discount applied */}
+                    {useRewardOnThisJob && discount > 0 ? (
                         <div className="mt-3 bg-green-50 p-3 rounded border border-green-100">
                            <p className="text-green-800 font-bold text-sm">REWARD APPLIED: -${discount.toFixed(2)}</p>
                            <p className="text-lg font-bold text-green-700">FINAL TOTAL: ${total.toFixed(2)}</p>
                         </div>
+                    ) : (
+                        // Fallback to standard total display
+                        <p className="text-sm text-gray-500 font-bold mt-2">Total Estimate: ${total.toFixed(2)}</p>
                     )}
-                    {!isRewardAvailable && <p className="text-sm text-gray-500 font-bold mt-2">Total Estimate: ${total.toFixed(2)}</p>}
                     
                   </div>
               ) : (
@@ -352,7 +387,7 @@ const getStatusBadge = (status) => {
           </div>
         </div>
 
-        {/* LIST SECTION */}
+        {/* LIST SECTION (same) */}
         <div className="md:col-span-2 order-2 space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
              <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
@@ -362,7 +397,7 @@ const getStatusBadge = (status) => {
           {filteredJobs.length === 0 && <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200"><p className="text-gray-500">No {filter !== 'all' ? filter : ''} requests found.</p></div>}
 
           {filteredJobs.map((job) => {
-             // The variable canEdit is removed to clear linter warnings.
+             // The variable canEdit is removed.
              
              return (
                <div key={job.id} className="bg-white shadow-sm rounded-lg p-5 border border-gray-100 relative hover:shadow-md transition-shadow">
@@ -411,8 +446,8 @@ const getStatusBadge = (status) => {
                       {job.status === 'delivered' ? (
                         <button onClick={() => setViewProofJob(job)} className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-200 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors"><Package className="h-3 w-3 mr-1"/> View Proof</button>
                       ) : (
-                         // Show Edit button only if pending, otherwise rely on Accept/Counter buttons in rejection box
-                         job.status === 'pending' && (
+                         /* NEW FIX: Only allow editing if pending OR rejected (and client hasn't countered) */
+                         (job.status === 'pending' || (job.status === 'rejected' && !job.hasClientCountered)) && (
                              <button 
                                 onClick={() => handleEdit(job)} 
                                 className={`text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors hover:bg-blue-100`}
