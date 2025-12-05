@@ -1,85 +1,94 @@
 // src/utils/tierSystem.js
 
+export const ROLLOVER_CAP = 49; // The maximum amount a user can carry over (Top of Stone Tier)
+
 export const TIERS = [
     { 
         id: 'dirt', 
         name: 'Dirt', 
-        min: 0, 
+        floor: 0, // Lower bound
+        ceiling: 9, // Upper bound
         color: 'bg-amber-900', 
         textColor: 'text-amber-900',
         icon: '🟤',
-        multiplier: 1.0,
-        slotsNeeded: 10, // NEW: Defines visual card size
-        reqText: '0-4 Deliveries/Mo',
+        slotsNeeded: 10, // 10 Stamps = 1 Free
+        reqText: '0 - 9 Deliveries',
         perk: '10 Stamps = 1 Free Delivery' 
     },
     { 
         id: 'wood', 
         name: 'Wood', 
-        min: 5, 
+        floor: 10, 
+        ceiling: 24,
         color: 'bg-yellow-800', 
         textColor: 'text-yellow-800', 
         icon: '🪵',
-        multiplier: 1.12,
-        slotsNeeded: 9, // NEW
-        reqText: '5-14 Deliveries/Mo',
+        slotsNeeded: 9, // 9 Stamps = 1 Free
+        reqText: '10 - 24 Deliveries',
         perk: '9 Stamps = 1 Free Delivery' 
     },
     { 
         id: 'stone', 
         name: 'Stone', 
-        min: 15, 
+        floor: 25, 
+        ceiling: 49,
         color: 'bg-gray-500', 
         textColor: 'text-gray-600', 
         icon: '🪨', 
-        multiplier: 1.25,
-        slotsNeeded: 8, // NEW
-        reqText: '15-29 Deliveries/Mo',
+        slotsNeeded: 8, // 8 Stamps = 1 Free
+        reqText: '25 - 49 Deliveries',
         perk: '8 Stamps = 1 Free Delivery' 
     },
     { 
         id: 'iron', 
         name: 'Iron', 
-        min: 30, 
+        floor: 50, 
+        ceiling: 79,
         color: 'bg-slate-400', 
         textColor: 'text-slate-500', 
         icon: '⚔️',
-        multiplier: 1.43,
-        slotsNeeded: 7, // NEW
-        reqText: '30-59 Deliveries/Mo',
+        slotsNeeded: 7, // 7 Stamps = 1 Free
+        reqText: '50 - 79 Deliveries',
         perk: '7 Stamps = 1 Free Delivery' 
     },
     { 
         id: 'gold', 
         name: 'Gold', 
-        min: 60, 
+        floor: 80, 
+        ceiling: 119,
         color: 'bg-yellow-400', 
         textColor: 'text-yellow-600', 
         icon: '🥇',
-        multiplier: 1.67,
-        slotsNeeded: 6, // NEW
-        reqText: '60-99 Deliveries/Mo',
+        slotsNeeded: 6, // 6 Stamps = 1 Free
+        reqText: '80 - 119 Deliveries',
         perk: '6 Stamps = 1 Free Delivery' 
     },
     { 
         id: 'diamond', 
         name: 'Diamond', 
-        min: 100, 
+        floor: 120, 
+        ceiling: 99999, // Infinite
         color: 'bg-cyan-400', 
         textColor: 'text-cyan-600', 
         icon: '💎',
-        multiplier: 2.0,
-        slotsNeeded: 5, // NEW
-        reqText: '100+ Deliveries/Mo',
+        slotsNeeded: 5, // 5 Stamps = 1 Free
+        reqText: '120+ Deliveries',
         perk: '5 Stamps = 1 Free Delivery!' 
     }
 ];
 
+// Helper to find which tier a count belongs to
+export const getTierByCount = (count) => {
+    // Find the tier where count is >= floor and <= ceiling (if defined) or just logic check
+    // Since we ordered them low to high, we can find the last one that fits, or just find based on floor.
+    // Easier approach with reverse search:
+    return [...TIERS].reverse().find(t => count >= t.floor) || TIERS[0];
+};
+
 export const calculateTier = (monthlyCount) => {
-    // Reverse find the highest tier the user qualifies for
-    const tier = [...TIERS].reverse().find(t => monthlyCount >= t.min) || TIERS[0];
+    const tier = getTierByCount(monthlyCount);
     
-    // Calculate next tier details
+    // Find next tier
     const currentIndex = TIERS.findIndex(t => t.id === tier.id);
     const nextTier = TIERS[currentIndex + 1];
     
@@ -87,10 +96,10 @@ export const calculateTier = (monthlyCount) => {
     let toNext = 0;
 
     if (nextTier) {
-        const range = nextTier.min - tier.min;
-        const currentInTier = monthlyCount - tier.min;
+        const range = nextTier.floor - tier.floor;
+        const currentInTier = monthlyCount - tier.floor;
         progress = (currentInTier / range) * 100;
-        toNext = nextTier.min - monthlyCount;
+        toNext = nextTier.floor - monthlyCount;
     }
 
     return { 

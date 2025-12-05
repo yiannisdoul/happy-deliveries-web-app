@@ -7,21 +7,22 @@ export default function LoyaltyCard({ stamps, rewardCount, useRewardOnThisJob, s
     // 1. Get current tier info
     const { current } = calculateTier(monthlyDeliveryCount);
     
-    // 2. Set Max Stamps dynamically based on Tier (Dirt=10, Diamond=5)
-    const MAX_STAMPS = current.slotsNeeded; 
+    // 2. Set Max Stamps dynamically based on Tier (Dirt=10 ... Diamond=5)
+    // Fallback to 10 if undefined to prevent crash during loading
+    const MAX_STAMPS = current.slotsNeeded || 10; 
     
     const renderStars = () => {
         let starsArr = [];
         for (let i = 0; i < MAX_STAMPS; i++) {
             if (i < stamps) {
-                // Full Star
+                // Full Star (Collected)
                 starsArr.push(
                     <div key={i} className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-500 shadow-sm border border-blue-200 transition-transform hover:scale-110">
                         <Star className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
                     </div>
                 );
             } else {
-                // Empty Star
+                // Empty Star (Needed)
                 starsArr.push(
                     <div key={i} className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 border border-gray-200">
                         <Star className="w-6 h-6 sm:w-7 sm:h-7" />
@@ -73,14 +74,14 @@ export default function LoyaltyCard({ stamps, rewardCount, useRewardOnThisJob, s
                 )}
             </div>
 
-            {/* Stars Grid - Center alignment ensures 5 stars look just as good as 10 */}
+            {/* Stars Grid - Centered alignment handles variable star counts gracefully */}
             <div className="flex flex-wrap gap-3 sm:gap-4 justify-center items-center mb-3 py-2">
                 {renderStars()}
             </div>
             
             <div className="text-center">
                 <p className="text-xs text-amber-800/60 font-medium">
-                    (You currently have **{stamps}** / {MAX_STAMPS} stamps.)
+                    (You currently have {stamps} / {MAX_STAMPS} stamps.)
                 </p>
             </div>
         </div>

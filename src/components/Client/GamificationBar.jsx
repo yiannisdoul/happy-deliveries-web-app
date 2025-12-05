@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Info, Star, ChevronUp, ChevronDown } from 'lucide-react';
+import { Info, ChevronUp, ChevronDown } from 'lucide-react';
 import { calculateTier, TIERS } from '../../utils/tierSystem';
 
 export default function GamificationBar({ monthlyDeliveryCount = 0 }) {
@@ -21,7 +21,7 @@ export default function GamificationBar({ monthlyDeliveryCount = 0 }) {
                                 {current.name} Tier
                             </h3>
                             <span className="text-[10px] text-gray-400 font-bold uppercase">
-                                Multiplier: {current.multiplier}x
+                                Goal: {current.slotsNeeded} Stamps/Freebie
                             </span>
                         </div>
                     </div>
@@ -40,7 +40,7 @@ export default function GamificationBar({ monthlyDeliveryCount = 0 }) {
             {/* Progress Bar Section */}
             <div className="relative">
                 <div className="flex justify-between text-xs font-bold text-gray-400 mb-1">
-                    <span>{monthlyDeliveryCount} / {next ? next.min : '∞'} Jobs</span>
+                    <span>{monthlyDeliveryCount} / {next ? next.floor : '∞'} Monthly Deliveries</span>
                     {next && <span className="text-gray-500">Next: {next.name}</span>}
                 </div>
                 
@@ -61,7 +61,7 @@ export default function GamificationBar({ monthlyDeliveryCount = 0 }) {
                 </p>
             </div>
 
-            {/* Expanded Perks Table */}
+            {/* Expanded Perks Table (The Fix) */}
             {showInfo && (
                 <div className="mt-4 pt-4 border-t border-gray-100 animate-in fade-in slide-in-from-top-2">
                     <h4 className="text-xs font-bold text-gray-900 uppercase mb-3">Monthly Status Levels</h4>
@@ -69,32 +69,33 @@ export default function GamificationBar({ monthlyDeliveryCount = 0 }) {
                         {TIERS.map(t => (
                             <div 
                                 key={t.id} 
-                                className={`grid grid-cols-12 items-center text-xs p-2 rounded-lg transition-colors ${
+                                // Adjust padding for compact view and ensure text sizes are minimal
+                                className={`grid grid-cols-12 items-center text-[10px] p-1.5 rounded-lg transition-colors min-w-full ${
                                     current.id === t.id 
                                     ? 'bg-blue-50 border border-blue-100 shadow-sm' 
                                     : 'hover:bg-gray-50 border border-transparent'
                                 }`}
                             >
-                                {/* Icon & Name */}
-                                <div className="col-span-3 flex items-center gap-2">
+                                {/* Icon & Name: col-span-3 (no change) */}
+                                <div className="col-span-3 flex items-center gap-2 font-bold">
                                     <span className="text-base">{t.icon}</span>
                                     <span className={`font-bold ${t.textColor}`}>{t.name}</span>
                                 </div>
                                 
-                                {/* Requirement */}
-                                <div className="col-span-4 text-gray-500 font-medium text-[10px] sm:text-xs">
+                                {/* Requirement: col-span-5 - Text is highly condensed here */}
+                                <div className="col-span-5 text-gray-500 font-medium">
                                     {t.reqText}
                                 </div>
 
-                                {/* Perk */}
-                                <div className="col-span-5 text-right font-bold text-gray-700 text-[10px] sm:text-xs">
+                                {/* Perk: col-span-4 - Text is highly condensed here */}
+                                <div className="col-span-4 text-right font-bold text-gray-700">
                                     {t.perk}
                                 </div>
                             </div>
                         ))}
                     </div>
                     <p className="text-[10px] text-gray-400 mt-3 text-center italic">
-                        *Levels update immediately. Perks apply to your next delivery.
+                        *Delivery counts reset monthly. Surplus rolls over (up to 49).
                     </p>
                 </div>
             )}
