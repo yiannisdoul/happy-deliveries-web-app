@@ -13,7 +13,6 @@ const getStatusBadge = (status) => {
     }
 };
 
-// UPDATED PROPS: Removed handleCounterClick, added openCounterModal
 export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit }) {
     
     // Determine if the client can edit (Pending) or counter (Rejected and hasn't countered yet)
@@ -47,7 +46,7 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                                     {canCounter && (
                                     <div className="flex gap-2 mt-2 sm:mt-0">
                                             <button onClick={() => handleAcceptCounter(job)} className="bg-green-600 text-white text-xs px-3 py-1 rounded font-bold hover:bg-green-700">Accept Offer</button>
-                                            {/* ACTION: Triggers the new modal */}
+                                            {/* FIX: Using the correct prop name passed from parent */}
                                             <button onClick={() => openCounterModal(job)} className="bg-blue-600 text-white text-xs px-3 py-1 rounded font-bold hover:bg-blue-700">Counter</button> 
                                     </div>
                                     )}
