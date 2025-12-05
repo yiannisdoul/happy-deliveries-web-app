@@ -3,9 +3,10 @@ import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { REWARD_VALUE } from '../utils/constants';
+import { useNavigate } from 'react-router-dom'; // Required for new info icons
 
 // UTILS
-import { checkAndPerformReset } from '../utils/resetLogic'; // NEW IMPORT
+import { checkAndPerformReset } from '../utils/resetLogic';
 
 // COMPONENTS
 import LoyaltyCard from '../components/Client/LoyaltyCard';
@@ -23,6 +24,7 @@ const getTomorrowDate = () => {
 };
 
 export default function ClientDash() {
+    const navigate = useNavigate();
     const [jobs, setJobs] = useState([]);
     const [filter, setFilter] = useState('all'); 
     const [editingId, setEditingId] = useState(null); 
@@ -70,9 +72,10 @@ export default function ClientDash() {
                 const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
                     const userData = userDoc.data() || {};
 
-                    // --- TEMPORARY MODIFICATION: COMMENT OUT RESET LOGIC WHENEVER WE NEED TO TEST IT ---
+                    // --- MONTHLY RESET TRIGGER (Lazy Reset) ---
+                    // This line should be uncommented for production use:
                     checkAndPerformReset({ uid: user.uid, ...userData }); 
-                    // --------------------------------------------------------
+                    // ------------------------------------------
 
                     setStamps(userData.stamps || 0);
                     setRewardCount(userData.rewardCount || 0); 
@@ -349,13 +352,30 @@ export default function ClientDash() {
                     
                     <div className="space-y-4">
                         
-                        {/* 1. GAMIFICATION BAR */}
-                        <GamificationBar monthlyDeliveryCount={monthlyCount} />
+                        {/* 1. GAMIFICATION BAR (TIER STATUS) */}
+                        <div className="relative">
+                            <GamificationBar monthlyDeliveryCount={monthlyCount} />
+                            {/* Info Icon for Tier Program */}
+                            <div 
+                                className="absolute top-2 right-2 z-10 group cursor-pointer" // Adjusted position (top-2, right-2)
+                                onClick={() => navigate('/tier-program')}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path>
+                                    <path d="M12 17h.01"></path>
+                                </svg>
+                                {/* Hover Tooltip */}
+                                <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">
+                                    View details on tiers, floors, and rollover protection.
+                                </div>
+                            </div>
+                        </div>
 
                         <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
                             
                             {/* 2. LOYALTY CARD */}
-                            <div id="loyalty-card-target">
+                            <div id="loyalty-card-target" className="relative">
                                 <LoyaltyCard 
                                     stamps={stamps}
                                     rewardCount={rewardCount}
@@ -363,6 +383,20 @@ export default function ClientDash() {
                                     setUseRewardOnThisJob={setUseRewardOnThisJob}
                                     monthlyDeliveryCount={monthlyCount} 
                                 />
+                                {/* Info Icon for Loyalty Program (Positioned absolutely inside the card) */}
+                                <div 
+                                    className="absolute top-2 right-2 z-10 group cursor-pointer" // Adjusted position (top-2, right-2)
+                                    onClick={() => navigate('/loyalty-program')}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path>
+                                        <path d="M12 17h.01"></path>
+                                    </svg>
+                                    <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">
+                                        Details on stamp earning, rewards, and how tiers affect your goal.
+                                    </div>
+                                </div>
                             </div>
                             
                             {/* 3. REQUEST FORM */}

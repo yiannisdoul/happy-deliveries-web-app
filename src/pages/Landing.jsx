@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Calendar, DollarSign, Shield } from 'lucide-react';
+import { CheckCircle, Calendar, DollarSign, Shield, TrendingUp, Maximize } from 'lucide-react'; // Added TrendingUp, Maximize
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -14,26 +14,26 @@ export default function Landing() {
           {/* Text Content */}
           <div className="lg:w-1/2 text-center lg:text-left">
             <h1 className="text-4xl font-extrabold text-slate-900 sm:text-5xl md:text-6xl tracking-tight">
-              <span className="block">Reliable delivery</span>
-              <span className="block text-blue-600">when you need it.</span>
+              <span className="block">Reliable delivery,</span>
+              <span className="block text-blue-600">earn free service.</span> 
             </h1>
             <p className="mt-4 text-base text-gray-500 sm:text-lg md:text-xl max-w-2xl mx-auto lg:mx-0">
-              Professional courier services for your business or personal needs. 
-              We accept cash or bank transfer. Simple, fast, and secure.
+              Professional courier services with a rewarding loyalty program. 
+              Unlock faster free deliveries with our status tiers and bank your rewards forever.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
               <button onClick={() => navigate('/signup')}
                 className="w-full sm:w-auto px-8 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-lg font-bold text-lg">
                 Book a Delivery
               </button>
-              <button onClick={() => navigate('/login')}
-                className="w-full sm:w-auto px-8 py-3 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 font-bold text-lg">
-                Log In
+              <button onClick={() => navigate('/tier-program')} // Link to Tier Page
+                className="w-full sm:w-auto px-8 py-3 text-blue-600 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 font-bold text-lg">
+                View Loyalty Perks
               </button>
             </div>
           </div>
           
-          {/* Illustration Card */}
+          {/* Illustration Card (Existing) */}
           <div className="mt-10 lg:mt-0 lg:w-1/2 lg:pl-12 flex justify-center">
              <div className="bg-blue-50 rounded-2xl p-6 transform rotate-2 shadow-xl border border-blue-100 max-w-sm w-full">
                 <div className="space-y-4">
@@ -57,14 +57,14 @@ export default function Landing() {
         </div>
       </div>
 
-      {/* Feature Grid */}
+      {/* Feature Grid (Updated with Tier/Loyalty) */}
       <div className="py-12 bg-gray-50">
         <div className="max-w-6xl mx-auto px-4">
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
-                {icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-100', title: 'Flexible Payment', desc: 'Pay via cash upon pickup or bank transfer.'},
-                {icon: Shield, color: 'text-green-600', bg: 'bg-green-100', title: 'Verified Transport', desc: 'Your goods are handled with care by pros.'},
-                {icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-100', title: 'Instant Scheduling', desc: 'Request a slot and get confirmation directly.'}
+                {icon: Maximize, color: 'text-yellow-600', bg: 'bg-yellow-100', title: 'Earn FREE Deliveries', desc: 'Our Loyalty Card tracks stamps to provide free service on every 5-10 jobs.'},
+                {icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-100', title: 'Progressive Status Tiers', desc: 'Climb status levels (Dirt to Diamond) to permanently reduce the required stamps per reward.'},
+                {icon: Shield, color: 'text-green-600', bg: 'bg-green-100', title: 'Rollover Protection', desc: 'Surplus deliveries roll over monthly, guaranteeing a head start toward your next tier status.'}
               ].map((f, i) => (
                 <div key={i} className="p-6 bg-white rounded-xl shadow-sm border border-slate-100 text-center md:text-left">
                   <div className={`h-12 w-12 ${f.bg} rounded-full flex items-center justify-center mb-4 ${f.color} mx-auto md:mx-0`}>

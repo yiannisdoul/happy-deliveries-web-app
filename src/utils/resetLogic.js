@@ -5,7 +5,7 @@ import { db } from '../config/firebase';
 
 // --- TEMPORARY DEBUG FLAG ---
 // Must be TRUE to execute the forced reset below
-const FORCE_DEBUG_RESET = true; 
+const FORCE_DEBUG_RESET = false; 
 // -----------------------------
 
 /**
