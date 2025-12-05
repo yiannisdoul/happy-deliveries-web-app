@@ -11,6 +11,14 @@ import ClientJobCard from '../components/Client/JobCard';
 import ProofViewModal from '../components/Client/ProofViewModal';
 import CounterOfferModal from '../components/Client/CounterOfferModal';
 
+// --- HELPER: Get Tomorrow's Date for Default State ---
+// This prevents "Time in past" errors on load, ensuring the Quote box is visible.
+const getTomorrowDate = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
+};
+
 export default function ClientDash() {
   const [jobs, setJobs] = useState([]);
   const [filter, setFilter] = useState('all'); 
@@ -38,7 +46,10 @@ export default function ClientDash() {
     pickupName: '', pickupPhone: '', from: '',
     dropoffName: '', dropoffPhone: '', to: '',
     notes: '', amount: '', paymentMethod: 'cash',
-    date: new Date().toISOString().split('T')[0],
+    
+    // UPDATED: Default to Tomorrow
+    date: getTomorrowDate(),
+    
     hour: '10', minute: '00', ampm: 'AM',
     acceptSurcharge: false,
     purchaseOrder: '', poType: 'entry'    
@@ -120,6 +131,7 @@ export default function ClientDash() {
 
     return { total: subtotal, subtotal: subtotal, surcharge: surcharge, isLate: isLate, discount: discount };
   };
+  
   const { total, subtotal, surcharge, isLate, discount } = calculateTotal();
   const timeStatus = getTimeValidation();
 
@@ -154,12 +166,10 @@ export default function ClientDash() {
   const handleSubmitCounterModal = async (e) => {
     e.preventDefault();
     
-    // Perform essential checks
     if (counteringJob.rejectionDetails?.reason === 'price' && !counterPrice) {
         return alert("Please enter a new price for your counter-offer.");
     }
     if (counteringJob.rejectionDetails?.reason === 'time') {
-        // Simple presence check for time fields
         if (!counterDate || !counterHour || !counterMinute) {
              return alert("Please select a new date and time for your counter-offer.");
         }
@@ -178,7 +188,6 @@ export default function ClientDash() {
     let updatedMinute = job.minute;
     let updatedAmpm = job.ampm;
     
-    // Apply changes from the modal inputs
     if (job.rejectionDetails?.reason === 'price') {
         const newPrice = parseFloat(counterPrice);
         updatedAmount = newPrice;
@@ -289,8 +298,11 @@ export default function ClientDash() {
         await updateDoc(doc(db, "requests", editingId), payload);
         alert("Request Updated!"); setEditingId(null);
       }
+      
+      // RESET FORM - Reset Date to Tomorrow as well
       setFormData({ pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
-        notes: '', amount: '', paymentMethod: 'cash', date: new Date().toISOString().split('T')[0],
+        notes: '', amount: '', paymentMethod: 'cash', 
+        date: getTomorrowDate(),
         hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry'
       });
     } catch (e) {
@@ -313,7 +325,7 @@ export default function ClientDash() {
           setViewProofJob={setViewProofJob}
       />
       
-      {/* NEW COUNTER MODAL */}
+      {/* COUNTER MODAL */}
       <CounterOfferModal
           counteringJob={counteringJob}
           setCounteringJob={setCounteringJob}
@@ -321,45 +333,49 @@ export default function ClientDash() {
           counterNote={counterNote} setCounterNote={setCounterNote}
           counterPrice={counterPrice} setCounterPrice={setCounterPrice}
           counterDate={counterDate} setCounterDate={setCounterDate}
-          counterHour={counterHour} setCounterHour={setCounterHour}
+          counterHour={counterHour} setCounterHour={counterHour}
           counterMinute={counterMinute} setCounterMinute={setCounterMinute}
-          counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
+          counterAmpm={counterAmpm} setCounterAmpm={counterAmpm}
       />
 
       <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
         
         {/* FORM SECTION */}
         <div className="md:col-span-1 order-1">
-          <div className="bg-white shadow-lg rounded-xl p-5 sticky top-24 border border-gray-100">
+          <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100"> 
             
-            <LoyaltyCard 
-                stamps={stamps}
-                rewardCount={rewardCount}
-                useRewardOnThisJob={useRewardOnThisJob}
-                setUseRewardOnThisJob={setUseRewardOnThisJob}
-            />
+            <div id="loyalty-card-target">
+              <LoyaltyCard 
+                  stamps={stamps}
+                  rewardCount={rewardCount}
+                  useRewardOnThisJob={useRewardOnThisJob}
+                  setUseRewardOnThisJob={setUseRewardOnThisJob}
+              />
+            </div>
             
-            <RequestForm
-                formData={formData}
-                setFormData={setFormData}
-                handleSubmit={handleSubmit}
-                handlePhoneInput={handlePhoneInput}
-                timeStatus={timeStatus}
-                isLate={isLate}
-                total={total}
-                subtotal={subtotal}
-                discount={discount}
-                editingId={editingId}
-                loading={loading}
-            />
+            <div id="request-form-target">
+              <RequestForm
+                  formData={formData}
+                  setFormData={setFormData}
+                  handleSubmit={handleSubmit}
+                  handlePhoneInput={handlePhoneInput}
+                  timeStatus={timeStatus}
+                  isLate={isLate}
+                  total={total}
+                  subtotal={subtotal}
+                  discount={discount}
+                  editingId={editingId}
+                  loading={loading}
+              />
+            </div>
           </div>
         </div>
 
         {/* LIST SECTION */}
-        <div className="md:col-span-2 order-2 space-y-4">
+        <div className="md:col-span-2 order-2 space-y-4" id="jobs-list-target">
           <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
              <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
-             <div className="flex bg-gray-100 p-1 rounded-lg space-x-1">
+             <div className="flex bg-gray-100 p-1 rounded-lg space-x-1" id="jobs-filter-target">
                 {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
                     <button key={status} onClick={() => setFilter(status)} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
                 ))}

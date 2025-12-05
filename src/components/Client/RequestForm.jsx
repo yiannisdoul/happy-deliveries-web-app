@@ -72,7 +72,7 @@ export default function RequestForm({
                 
                 {/* Amount and Total Calculation */}
                 {timeStatus.isValid ? (
-                    <div>
+                    <div id="total-section-target">
                         <div className="relative rounded shadow-sm">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center"><DollarSign className="h-4 w-4 text-gray-400" /></div>
                             <input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
