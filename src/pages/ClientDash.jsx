@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../config/firebase';
+import { db, auth } from '../config/firebase'; // Ensure path is correct relative to src/pages
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { REWARD_VALUE } from '../utils/constants';
 
-// IMPORT NEW COMPONENTS
+// COMPONENTS
+// Adjusted paths assuming clientdash.jsx is in src/pages/ and components are in src/components/Client/
 import LoyaltyCard from '../components/Client/LoyaltyCard';
 import RequestForm from '../components/Client/RequestForm';
 import ClientJobCard from '../components/Client/JobCard';
 import ProofViewModal from '../components/Client/ProofViewModal';
 import CounterOfferModal from '../components/Client/CounterOfferModal';
+import GamificationBar from '../components/Client/GamificationBar'; // NEW COMPONENT
 
 // --- HELPER: Get Tomorrow's Date for Default State ---
-// This prevents "Time in past" errors on load, ensuring the Quote box is visible.
 const getTomorrowDate = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -26,11 +27,12 @@ export default function ClientDash() {
   const [loading, setLoading] = useState(false);
   const [viewProofJob, setViewProofJob] = useState(null);
   
-  // --- LOYALTY STATE ---
+  // --- LOYALTY & GAMIFICATION STATE ---
   const [stamps, setStamps] = useState(0); 
   const [rewardCount, setRewardCount] = useState(0); 
+  const [monthlyCount, setMonthlyCount] = useState(0); // NEW: Track monthly deliveries
   const [useRewardOnThisJob, setUseRewardOnThisJob] = useState(false); 
-  // ---------------------
+  // ------------------------------------
 
   // --- COUNTER MODAL STATE ---
   const [counteringJob, setCounteringJob] = useState(null); 
@@ -47,7 +49,7 @@ export default function ClientDash() {
     dropoffName: '', dropoffPhone: '', to: '',
     notes: '', amount: '', paymentMethod: 'cash',
     
-    // UPDATED: Default to Tomorrow
+    // Default to Tomorrow
     date: getTomorrowDate(),
     
     hour: '10', minute: '00', ampm: 'AM',
@@ -64,13 +66,17 @@ export default function ClientDash() {
     
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
+        // 1. Listen to User Profile (Stamps, Rewards, Gamification Stats)
         const userRef = doc(db, "users", user.uid);
         const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
             const userData = userDoc.data() || {};
             setStamps(userData.stamps || 0);
             setRewardCount(userData.rewardCount || 0); 
+            // Fetch monthly count for Gamification (Default to 0)
+            setMonthlyCount(userData.monthlyDeliveryCount || 0);
         });
 
+        // 2. Listen to Client's Requests
         const q = query(collection(db, "requests"), where("clientEmail", "==", user.email));
         unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
           const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -80,7 +86,7 @@ export default function ClientDash() {
         
         return () => { unsubscribeUser(); unsubscribeSnapshot(); };
       } else {
-        setJobs([]); setStamps(0); setRewardCount(0); setUseRewardOnThisJob(false);
+        setJobs([]); setStamps(0); setRewardCount(0); setMonthlyCount(0); setUseRewardOnThisJob(false);
       }
     });
     return () => unsubscribeAuth();
@@ -299,7 +305,7 @@ export default function ClientDash() {
         alert("Request Updated!"); setEditingId(null);
       }
       
-      // RESET FORM - Reset Date to Tomorrow as well
+      // RESET FORM - Reset Date to Tomorrow
       setFormData({ pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
         notes: '', amount: '', paymentMethod: 'cash', 
         date: getTomorrowDate(),
@@ -340,38 +346,46 @@ export default function ClientDash() {
 
       <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
         
-        {/* FORM SECTION */}
+        {/* LEFT COLUMN: Gamification + Loyalty + Form */}
         <div className="md:col-span-1 order-1">
-          <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100"> 
-            
-            <div id="loyalty-card-target">
-              <LoyaltyCard 
-                  stamps={stamps}
-                  rewardCount={rewardCount}
-                  useRewardOnThisJob={useRewardOnThisJob}
-                  setUseRewardOnThisJob={setUseRewardOnThisJob}
-              />
-            </div>
-            
-            <div id="request-form-target">
-              <RequestForm
-                  formData={formData}
-                  setFormData={setFormData}
-                  handleSubmit={handleSubmit}
-                  handlePhoneInput={handlePhoneInput}
-                  timeStatus={timeStatus}
-                  isLate={isLate}
-                  total={total}
-                  subtotal={subtotal}
-                  discount={discount}
-                  editingId={editingId}
-                  loading={loading}
-              />
-            </div>
+          
+          <div className="space-y-4">
+              
+              {/* GAMIFICATION BAR */}
+              <GamificationBar monthlyDeliveryCount={monthlyCount} />
+
+              <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
+                
+              <div id="loyalty-card-target">
+                <LoyaltyCard 
+                    stamps={stamps}
+                    rewardCount={rewardCount}
+                    useRewardOnThisJob={useRewardOnThisJob}
+                    setUseRewardOnThisJob={setUseRewardOnThisJob}
+                    monthlyDeliveryCount={monthlyCount} // <--- ADDED THIS PROP
+                />
+              </div>
+                
+                <div id="request-form-target">
+                  <RequestForm
+                      formData={formData}
+                      setFormData={setFormData}
+                      handleSubmit={handleSubmit}
+                      handlePhoneInput={handlePhoneInput}
+                      timeStatus={timeStatus}
+                      isLate={isLate}
+                      total={total}
+                      subtotal={subtotal}
+                      discount={discount}
+                      editingId={editingId}
+                      loading={loading}
+                  />
+                </div>
+              </div>
           </div>
         </div>
 
-        {/* LIST SECTION */}
+        {/* RIGHT COLUMN: Jobs List */}
         <div className="md:col-span-2 order-2 space-y-4" id="jobs-list-target">
           <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
              <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
