@@ -3,7 +3,7 @@ import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { REWARD_VALUE } from '../utils/constants';
-import { useNavigate } from 'react-router-dom'; // Required for new info icons
+import { useNavigate } from 'react-router-dom'; 
 
 // UTILS
 import { checkAndPerformReset } from '../utils/resetLogic';
@@ -16,7 +16,6 @@ import ProofViewModal from '../components/Client/ProofViewModal';
 import CounterOfferModal from '../components/Client/CounterOfferModal';
 import GamificationBar from '../components/Client/GamificationBar';
 
-// --- HELPER: Get Tomorrow's Date for Default State ---
 const getTomorrowDate = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -58,10 +57,6 @@ export default function ClientDash() {
         purchaseOrder: '', poType: 'entry'    
     });
 
-    // =======================================================
-    // DATA FETCHING AND FILTERING
-    // =======================================================
-    
     useEffect(() => {
         let unsubscribeSnapshot = () => {};
         
@@ -73,7 +68,6 @@ export default function ClientDash() {
                     const userData = userDoc.data() || {};
 
                     // --- MONTHLY RESET TRIGGER (Lazy Reset) ---
-                    // This line should be uncommented for production use:
                     checkAndPerformReset({ uid: user.uid, ...userData }); 
                     // ------------------------------------------
 
@@ -102,10 +96,6 @@ export default function ClientDash() {
         if (filter === 'all') return true;
         return job.status === filter;
     });
-
-    // =======================================================
-    // UTILITY & BUSINESS LOGIC FUNCTIONS
-    // =======================================================
 
     const getTimeValidation = () => {
         let hour24 = parseInt(formData.hour);
@@ -318,46 +308,27 @@ export default function ClientDash() {
         }
     };
 
-
-    // =======================================================
-    // RENDERING
-    // =======================================================
-
     return (
         <div className="max-w-6xl mx-auto px-4 py-6">
+            <ProofViewModal viewProofJob={viewProofJob} setViewProofJob={setViewProofJob} />
             
-            <ProofViewModal
-                viewProofJob={viewProofJob}
-                setViewProofJob={setViewProofJob}
-            />
-            
-            {/* COUNTER MODAL */}
             <CounterOfferModal
-                counteringJob={counteringJob}
-                setCounteringJob={setCounteringJob}
-                handleSubmitCounterModal={handleSubmitCounterModal}
-                counterNote={counterNote} setCounterNote={setCounterNote}
-                counterPrice={counterPrice} setCounterPrice={setCounterPrice}
-                counterDate={counterDate} setCounterDate={setCounterDate}
-                counterHour={counterHour} setCounterHour={counterHour}
-                counterMinute={counterMinute} setCounterMinute={setCounterMinute}
-                counterAmpm={counterAmpm} setCounterAmpm={counterAmpm}
+                counteringJob={counteringJob} setCounteringJob={setCounteringJob} handleSubmitCounterModal={handleSubmitCounterModal}
+                counterNote={counterNote} setCounterNote={setCounterNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice}
+                counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={setCounterHour}
+                counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
             />
 
-            {/* --- MAIN LAYOUT CONTAINER --- */}
             <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
-                
-                {/* LEFT/TOP COLUMN (Form, Loyalty, Gamification) */}
                 <div className="md:col-span-1 order-1">
-                    
                     <div className="space-y-4">
                         
                         {/* 1. GAMIFICATION BAR (TIER STATUS) */}
-                        <div className="relative">
+                        {/* ID Added for Tutorial */}
+                        <div id="gamification-bar-target" className="relative">
                             <GamificationBar monthlyDeliveryCount={monthlyCount} />
-                            {/* Info Icon for Tier Program */}
                             <div 
-                                className="absolute top-2 right-2 z-10 group cursor-pointer" // Adjusted position (top-2, right-2)
+                                className="absolute top-2 right-2 z-10 group cursor-pointer"
                                 onClick={() => navigate('/tier-program')}
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors">
@@ -365,7 +336,6 @@ export default function ClientDash() {
                                     <path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path>
                                     <path d="M12 17h.01"></path>
                                 </svg>
-                                {/* Hover Tooltip */}
                                 <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">
                                     View details on tiers, floors, and rollover protection.
                                 </div>
@@ -373,19 +343,14 @@ export default function ClientDash() {
                         </div>
 
                         <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
-                            
                             {/* 2. LOYALTY CARD */}
                             <div id="loyalty-card-target" className="relative">
                                 <LoyaltyCard 
-                                    stamps={stamps}
-                                    rewardCount={rewardCount}
-                                    useRewardOnThisJob={useRewardOnThisJob}
-                                    setUseRewardOnThisJob={setUseRewardOnThisJob}
-                                    monthlyDeliveryCount={monthlyCount} 
+                                    stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob}
+                                    setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} 
                                 />
-                                {/* Info Icon for Loyalty Program (Positioned absolutely inside the card) */}
                                 <div 
-                                    className="absolute top-2 right-2 z-10 group cursor-pointer" // Adjusted position (top-2, right-2)
+                                    className="absolute top-2 right-2 z-10 group cursor-pointer"
                                     onClick={() => navigate('/loyalty-program')}
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors">
@@ -402,29 +367,18 @@ export default function ClientDash() {
                             {/* 3. REQUEST FORM */}
                             <div id="request-form-target">
                                 <RequestForm
-                                    formData={formData}
-                                    setFormData={setFormData}
-                                    handleSubmit={handleSubmit}
-                                    handlePhoneInput={handlePhoneInput}
-                                    timeStatus={timeStatus}
-                                    isLate={isLate}
-                                    total={total}
-                                    subtotal={subtotal}
-                                    discount={discount}
-                                    editingId={editingId}
-                                    loading={loading}
+                                    formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput}
+                                    timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount}
+                                    editingId={editingId} loading={loading}
                                 />
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* RIGHT/BOTTOM COLUMN: Jobs List */}
                 <div className="md:col-span-2 order-2 space-y-4" id="jobs-list-target">
                     <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
                         <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
-                        
-                        {/* Filter Section: Ensure buttons wrap gracefully on narrow screens */}
                         <div className="flex flex-wrap justify-center sm:justify-end bg-gray-100 p-1 rounded-lg space-x-1" id="jobs-filter-target">
                             {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
                                 <button key={status} onClick={() => setFilter(status)} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
@@ -437,11 +391,8 @@ export default function ClientDash() {
                     <div className="space-y-4">
                         {filteredJobs.map((job) => (
                             <ClientJobCard
-                                key={job.id}
-                                job={job}
-                                openCounterModal={openCounterModal} 
-                                handleAcceptCounter={handleAcceptCounter}
-                                setViewProofJob={setViewProofJob}
+                                key={job.id} job={job} openCounterModal={openCounterModal} 
+                                handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob}
                                 handleEdit={handleEdit} 
                             />
                         ))}

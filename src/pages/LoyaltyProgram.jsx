@@ -17,57 +17,70 @@ export default function LoyaltyProgram() {
             <div className="bg-white rounded-xl shadow-lg p-6 sm:p-10 border border-gray-100">
                 <Maximize className="w-10 h-10 text-yellow-500 mb-4" />
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 mb-6">
-                    Happy Deliveries Loyalty Program
+                    Free Deliveries (Loyalty Card)
                 </h1>
                 
                 <p className="text-lg text-gray-600 mb-8">
-                    Our loyalty system is simple: earn stamps for every completed job to unlock <strong>free deliveries</strong>! The number of stamps required depends on your current Tier Status.
+                    It's just like a coffee card. Fill it up with stamps, and get a free one!
                 </p>
 
-                <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-blue-700 border-b border-blue-100 pb-2">
-                        How It Works
-                    </h2>
+                <div className="space-y-8">
                     
+                    {/* STEPS */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                        {/* Process Card 1 */}
-                        <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                            <Star className="w-6 h-6 text-yellow-600 mb-2"/>
-                            <h3 className="font-bold text-slate-800">Earn Stamps</h3>
-                            <p className="text-sm text-gray-600 mt-1">
-                                Every successfully delivered job earns you 1 stamp towards your next reward.
-                            </p>
+                        <div className="p-5 bg-yellow-50 rounded-xl border border-yellow-100 text-center">
+                            <div className="bg-white w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
+                                <Star className="w-6 h-6 text-yellow-500"/>
+                            </div>
+                            <h3 className="font-bold text-slate-900 mb-1">1. Get Stamps</h3>
+                            <p className="text-sm text-gray-600">Finish a delivery → Get 1 Stamp.</p>
                         </div>
 
-                        {/* Process Card 2 */}
-                        <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                            <Gift className="w-6 h-6 text-green-600 mb-2"/>
-                            <h3 className="font-bold text-slate-800">Bank Rewards</h3>
-                            <p className="text-sm text-gray-600 mt-1">
-                                Once your card is full (5-10 stamps), the reward is <strong>banked</strong> for future use. You can accumulate multiple banked rewards.
-                            </p>
+                        <div className="p-5 bg-green-50 rounded-xl border border-green-100 text-center">
+                            <div className="bg-white w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
+                                <Gift className="w-6 h-6 text-green-600"/>
+                            </div>
+                            <h3 className="font-bold text-slate-900 mb-1">2. Fill the Card</h3>
+                            <p className="text-sm text-gray-600">When card is full, you get a "Banked Reward".</p>
                         </div>
 
-                        {/* Process Card 3 */}
-                        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                            <Maximize className="w-6 h-6 text-blue-600 mb-2"/>
-                            <h3 className="font-bold text-slate-800">Redeem Anytime</h3>
-                            <p className="text-sm text-gray-600 mt-1">
-                                Toggle 'Use Reward' on the booking form to apply your discount. Rewards <strong>never expire</strong>!
-                            </p>
+                        <div className="p-5 bg-blue-50 rounded-xl border border-blue-100 text-center">
+                            <div className="bg-white w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
+                                <Maximize className="w-6 h-6 text-blue-600"/>
+                            </div>
+                            <h3 className="font-bold text-slate-900 mb-1">3. Use It</h3>
+                            <p className="text-sm text-gray-600">Toggle "Use Reward" on your next booking to get it free!</p>
                         </div>
                     </div>
 
-                    <h2 className="text-2xl font-bold text-blue-700 border-b border-blue-100 pb-2 pt-4">
-                        Loyalty & Tiers Together
-                    </h2>
-                    <p className="text-gray-700">
-                        The two systems are directly linked:
-                        <ul className="list-disc list-inside ml-4 mt-3 space-y-2">
-                            <li>Your <strong>Tier Status</strong> (Dirt, Iron, Diamond) determines how many stamps you need to fill your Loyalty Card (from 10 stamps down to 5).</li>
-                            <li>This means higher tiers unlock free deliveries <strong>faster</strong> by reducing the goalpost.</li>
-                        </ul>
-                    </p>
+                    {/* CONNECTION TO TIERS */}
+                    <div className="bg-slate-800 text-white p-6 rounded-xl shadow-lg">
+                        <h2 className="text-xl font-bold mb-3 border-b border-slate-600 pb-2">
+                            How do Tiers help?
+                        </h2>
+                        <p className="text-slate-300 mb-4">
+                            Your <strong>Tier Level</strong> decides how big your card is.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="bg-slate-700 p-3 rounded-lg flex items-center">
+                                <span className="text-2xl mr-3">🟤</span>
+                                <div>
+                                    <p className="font-bold text-amber-500">Dirt Tier</p>
+                                    <p className="text-xs text-slate-400">Needs 10 Stamps for freebie</p>
+                                </div>
+                            </div>
+                            <div className="bg-slate-700 p-3 rounded-lg flex items-center border border-cyan-500/50">
+                                <span className="text-2xl mr-3">💎</span>
+                                <div>
+                                    <p className="font-bold text-cyan-400">Diamond Tier</p>
+                                    <p className="text-xs text-slate-400">Needs only 5 Stamps!</p>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="text-center mt-4 text-sm font-bold text-yellow-400">
+                            Higher Tier = Less Stamps needed = More Free Stuff!
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>

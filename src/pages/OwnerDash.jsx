@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
-import { STAMP_MAX, CLOUD_NAME, UPLOAD_PRESET } from '../utils/constants';
+import { CLOUD_NAME, UPLOAD_PRESET } from '../utils/constants'; // Removed STAMP_MAX, we calculate dynamically now
+import { calculateTier } from '../utils/tierSystem'; // Import Tier Logic
 
 // IMPORT COMPONENTS
 import JobCard from '../components/Owner/JobCard';
@@ -21,7 +22,7 @@ export default function OwnerDash() {
   const [deliveringJobId, setDeliveringJobId] = useState(null);
   const [receiverName, setReceiverName] = useState('');
   const [photoFile, setPhotoFile] = useState(null); 
-  const [isSubmitting, setIsSubmitting] = useState(false); // State used by Delivery and Rejection Modals
+  const [isSubmitting, setIsSubmitting] = useState(false); 
   const sigPad = useRef({}); 
   const [viewProofJob, setViewProofJob] = useState(null);
   
@@ -65,7 +66,7 @@ export default function OwnerDash() {
       setCounterAmpm(job.ampm);
   };
   
-  // Logic required by DeliveryModal (kept concise)
+  // Logic required by DeliveryModal
   const uploadToCloudinary = async (file) => {
     const formData = new FormData(); formData.append('file', file);
     formData.append('upload_preset', UPLOAD_PRESET);
@@ -73,15 +74,47 @@ export default function OwnerDash() {
     if (!res.ok) throw new Error(`Cloudinary Upload failed with status ${res.status}`);
     const data = await res.json(); return data.secure_url;
   };
+
+  // --- UPDATED LOYALTY LOGIC ---
   const handleLoyaltyStamping = async (clientId, job) => {
       const userRef = doc(db, "users", clientId);
-      if (job.rewardUsed) return;
-      const userDoc = await getDoc(userRef); const userData = userDoc.data() || {};
-      let currentStamps = userData.stamps || 0; let currentRewards = userData.rewardCount || 0;
-      currentStamps += 1;
-      if (currentStamps >= STAMP_MAX) { currentRewards += 1; currentStamps = 0; }
-      await updateDoc(userRef, { stamps: currentStamps, rewardCount: currentRewards, });
+      const userDoc = await getDoc(userRef); 
+      const userData = userDoc.data() || {};
+
+      // 1. UPDATE EXPERIENCE (Monthly Count)
+      // Always increment this, even if a reward was used for this job.
+      const currentMonthlyCount = (userData.monthly_delivery_count || 0) + 1;
+      
+      const updates = {
+          monthly_delivery_count: currentMonthlyCount
+      };
+
+      // 2. UPDATE STAMPS (Only if reward NOT used)
+      if (!job.rewardUsed) {
+          let currentStamps = userData.stamps || 0;
+          let currentRewards = userData.rewardCount || 0;
+          
+          // Determine Max Stamps based on the USER'S TIER
+          // We use the NEW monthly count so they get immediate benefit if they just leveled up
+          const { current: tier } = calculateTier(currentMonthlyCount);
+          const maxStampsForUser = tier.slotsNeeded || 10;
+
+          currentStamps += 1;
+
+          // Check against dynamic limit (e.g., 9 for Wood, 5 for Diamond)
+          if (currentStamps >= maxStampsForUser) {
+              currentRewards += 1;
+              currentStamps = 0; // Reset card
+          }
+
+          updates.stamps = currentStamps;
+          updates.rewardCount = currentRewards;
+      }
+
+      // Commit updates
+      await updateDoc(userRef, updates);
   };
+
   const handleSubmitDelivery = async (e) => {
     e.preventDefault(); if (!receiverName) return alert("Please enter receiver's name");
     if (sigPad.current.isEmpty()) return alert("Please sign the delivery");
@@ -91,12 +124,17 @@ export default function OwnerDash() {
       photoURL = await uploadToCloudinary(photoFile);
       const sigData = sigPad.current.getCanvas().toDataURL('image/png'); const sigBlob = await (await fetch(sigData)).blob();
       sigURL = await uploadToCloudinary(sigBlob);
+      
       await updateDoc(doc(db, "requests", deliveringJobId), { status: 'delivered', deliveredAt: new Date().toISOString(), hasUnreadEdit: false, pod: { receiver: receiverName, photo: photoURL, signature: sigURL } });
+      
+      // Call updated loyalty logic
       try { await handleLoyaltyStamping(job.clientId, job); } catch (stampError) { console.error("Loyalty Stamp Failed (Check Firestore Rules):", stampError.message); }
+      
       setDeliveringJobId(null); setReceiverName(''); setPhotoFile(null);
       alert("✅ Job Delivered Successfully & Proof Saved! Well done.");
     } catch (error) { console.error("Delivery Error (Fatal):", error); alert(`❌ Delivery Failed: ${error.message}.`); } finally { setIsSubmitting(false); }
   };
+
   const handleCloseNotification = async () => {
     if (dontShowAgain && editedJobs.length > 0) {
       try { const promises = editedJobs.map(job => updateDoc(doc(db, "requests", job.id), { hasUnreadEdit: false })); await Promise.all(promises); } 
@@ -105,7 +143,6 @@ export default function OwnerDash() {
     setShowNotification(false); setDontShowAgain(false); setIsMinimized(false); 
   };
   
-  // Data Fetching and Filtering (Consolidated for line limit)
   useEffect(() => {
     const q = query(collection(db, "requests"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -153,14 +190,12 @@ export default function OwnerDash() {
       />
 
       <RejectionModal 
-          // Props passed down
           rejectingJobId={rejectingJobId} setRejectingJobId={setRejectingJobId}
           rejectionReason={rejectionReason} setRejectionReason={setRejectionReason} rejectionNote={rejectionNote}
           setRejectionNote={setRejectionNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice}
           counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={setCounterHour}
           counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
-          isSubmitting={isSubmitting} 
-          setIsSubmitting={setIsSubmitting} // <-- FIX: Pass setter here
+          isSubmitting={isSubmitting} setIsSubmitting={setIsSubmitting}
       />
       <DeliveryModal
           deliveringJobId={deliveringJobId} setDeliveringJobId={setDeliveringJobId} receiverName={receiverName}
