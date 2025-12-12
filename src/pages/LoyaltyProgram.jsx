@@ -1,5 +1,5 @@
 import React from 'react';
-import { Maximize, Star, Gift, ChevronLeft } from 'lucide-react';
+import { Maximize, Star, Gift, ChevronLeft, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function LoyaltyProgram() {
@@ -21,12 +21,27 @@ export default function LoyaltyProgram() {
                 </h1>
                 
                 <p className="text-lg text-gray-600 mb-8">
-                    It's just like a coffee card. Fill it up with stamps, and get a free one!
+                    It's just like a coffee card. Fill it up with stamps, and get a free delivery!
                 </p>
 
                 <div className="space-y-8">
                     
-                    {/* STEPS */}
+                    {/* IMPORTANT TERMS SECTION (NEW) */}
+                    <div className="bg-blue-50 border-l-4 border-blue-500 p-5 rounded-r-xl">
+                        <h3 className="flex items-center text-lg font-bold text-blue-900 mb-2">
+                            <Info className="w-5 h-5 mr-2" /> What is a "Free Delivery" worth?
+                        </h3>
+                        <p className="text-blue-800 text-sm leading-relaxed">
+                            Each banked reward covers delivery costs <strong>up to $160</strong>.
+                        </p>
+                        <ul className="list-disc list-inside mt-2 text-sm text-blue-700 space-y-1 ml-1">
+                            <li>This covers a standard <strong>50-75km</strong> job under <strong>1 tonne</strong>.</li>
+                            <li>If your job costs <strong>more than $160</strong>, you simply pay the difference.</li>
+                            <li>If your job costs <strong>less than $160</strong>, the delivery is free, but the remaining value is <strong>not carried over</strong> (use it or lose it!).</li>
+                        </ul>
+                    </div>
+
+                    {/* PROCESS STEPS */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                         <div className="p-5 bg-yellow-50 rounded-xl border border-yellow-100 text-center">
                             <div className="bg-white w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
@@ -49,7 +64,7 @@ export default function LoyaltyProgram() {
                                 <Maximize className="w-6 h-6 text-blue-600"/>
                             </div>
                             <h3 className="font-bold text-slate-900 mb-1">3. Use It</h3>
-                            <p className="text-sm text-gray-600">Toggle "Use Reward" on your next booking to get it free!</p>
+                            <p className="text-sm text-gray-600">Toggle "Use Reward" on your next booking to apply your <strong>$160 credit</strong>.</p>
                         </div>
                     </div>
 

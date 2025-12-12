@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
-    MapPin, DollarSign, FileText, CheckCircle, XCircle, Clock, 
-    Edit2, AlertTriangle, Package, ArrowRight 
+    MapPin, FileText, CheckCircle, XCircle, Clock, 
+    Edit2, AlertTriangle, Package, Truck, Scale
 } from 'lucide-react'; 
 
 const getStatusBadge = (status) => {
@@ -13,10 +13,8 @@ const getStatusBadge = (status) => {
     }
 };
 
-// UPDATED PROPS: Removed handleCounterClick, added openCounterModal
 export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit }) {
     
-    // Determine if the client can edit (Pending) or counter (Rejected and hasn't countered yet)
     const canEdit = job.status === 'pending';
     const canCounter = job.status === 'rejected' && !job.hasClientCountered;
 
@@ -30,6 +28,19 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                 <div className="space-y-1">
                     <p className="text-sm text-gray-600 flex items-center"><MapPin className="h-3 w-3 mr-1 text-blue-400"/> <span className="font-semibold text-gray-700 w-12">From:</span> {job.from}</p>
                     <p className="text-sm text-gray-600 flex items-center"><MapPin className="h-3 w-3 mr-1 text-orange-400"/> <span className="font-semibold text-gray-700 w-12">To:</span> {job.to}</p>
+                    
+                    {/* NEW: Display Distance & Weight */}
+                    {job.distanceLabel && job.weightLabel && (
+                        <div className="flex gap-2 my-2">
+                            <span className="text-xs bg-blue-50 text-blue-800 px-2 py-1 rounded border border-blue-100 flex items-center">
+                                <Truck className="h-3 w-3 mr-1"/> {job.distanceLabel}
+                            </span>
+                            <span className="text-xs bg-purple-50 text-purple-800 px-2 py-1 rounded border border-purple-100 flex items-center">
+                                <Scale className="h-3 w-3 mr-1"/> {job.weightLabel}
+                            </span>
+                        </div>
+                    )}
+
                     <p className="text-xs text-gray-500 flex items-center"><FileText className="h-3 w-3 mr-1"/> PO: <span className="font-medium ml-1">{job.purchaseOrder || 'N/A'}</span></p>
                     <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block"><p className="text-xs text-gray-600">Item: <span className="italic">{job.notes}</span></p></div>
                     
@@ -45,10 +56,12 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                                     {job.rejectionDetails.counterTime && <span className="font-bold text-blue-600 text-xs mr-2 block w-full sm:w-auto">Owner Proposes: {job.rejectionDetails.counterTime.date} @ {job.rejectionDetails.counterTime.hour}:{job.rejectionDetails.counterTime.minute} {job.rejectionDetails.counterTime.ampm}</span>}
                                     
                                     {canCounter && (
-                                    <div className="flex gap-2 mt-2 sm:mt-0">
-                                            <button onClick={() => handleAcceptCounter(job)} className="bg-green-600 text-white text-xs px-3 py-1 rounded font-bold hover:bg-green-700">Accept Offer</button>
-                                            {/* ACTION: Triggers the new modal */}
-                                            <button onClick={() => openCounterModal(job)} className="bg-blue-600 text-white text-xs px-3 py-1 rounded font-bold hover:bg-blue-700">Counter</button> 
+                                    <div className="flex flex-col sm:flex-row gap-2 mt-2 sm:mt-0 w-full sm:w-auto items-end">
+                                            <button onClick={() => handleAcceptCounter(job)} className="bg-green-600 text-white text-xs px-3 py-1 rounded font-bold hover:bg-green-700 w-full sm:w-auto">Accept Offer</button>
+                                            <div className="text-center w-full sm:w-auto">
+                                                <button onClick={() => openCounterModal(job)} className="bg-blue-600 text-white text-xs px-3 py-1 rounded font-bold hover:bg-blue-700 w-full sm:w-auto">Counter</button> 
+                                                <span className="text-[9px] text-red-600 block mt-0.5 font-bold uppercase tracking-tight">(1 attempt only)</span>
+                                            </div>
                                     </div>
                                     )}
                                     {!canCounter && job.hasClientCountered && <span className="text-xs font-bold text-green-700">Counter offer accepted or re-submitted.</span>}

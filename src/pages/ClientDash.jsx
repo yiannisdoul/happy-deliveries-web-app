@@ -3,10 +3,11 @@ import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { REWARD_VALUE } from '../utils/constants';
-import { useNavigate } from 'react-router-dom'; 
+import { useNavigate } from 'react-router-dom';
 
 // UTILS
 import { checkAndPerformReset } from '../utils/resetLogic';
+import { calculatePrice, DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../utils/pricingCalculator';
 
 // COMPONENTS
 import LoyaltyCard from '../components/Client/LoyaltyCard';
@@ -35,8 +36,7 @@ export default function ClientDash() {
     const [rewardCount, setRewardCount] = useState(0); 
     const [monthlyCount, setMonthlyCount] = useState(0); 
     const [useRewardOnThisJob, setUseRewardOnThisJob] = useState(false); 
-    // ------------------------------------
-
+    
     // --- COUNTER MODAL STATE ---
     const [counteringJob, setCounteringJob] = useState(null); 
     const [counterNote, setCounterNote] = useState('');
@@ -45,45 +45,42 @@ export default function ClientDash() {
     const [counterHour, setCounterHour] = useState('10');
     const [counterMinute, setCounterMinute] = useState('00');
     const [counterAmpm, setCounterAmpm] = useState('AM');
-    // -----------------------------
 
+    // --- FORM DATA ---
+    // Defaults: Distance Index 2 (50-75km), Weight Index 0 (<1t) -> $160
     const [formData, setFormData] = useState({
         pickupName: '', pickupPhone: '', from: '',
         dropoffName: '', dropoffPhone: '', to: '',
-        notes: '', amount: '', paymentMethod: 'cash',
+        notes: '', paymentMethod: 'cash',
         date: getTomorrowDate(),
         hour: '10', minute: '00', ampm: 'AM',
         acceptSurcharge: false,
-        purchaseOrder: '', poType: 'entry'    
+        purchaseOrder: '', poType: 'entry',
+        distIndex: 2, 
+        weightIndex: 0
     });
 
     useEffect(() => {
         let unsubscribeSnapshot = () => {};
-        
         const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
             if (user) {
-                // 1. Listen to User Profile
+                // 1. User Profile
                 const userRef = doc(db, "users", user.uid);
                 const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
                     const userData = userDoc.data() || {};
-
-                    // --- MONTHLY RESET TRIGGER (Lazy Reset) ---
                     checkAndPerformReset({ uid: user.uid, ...userData }); 
-                    // ------------------------------------------
-
                     setStamps(userData.stamps || 0);
                     setRewardCount(userData.rewardCount || 0); 
                     setMonthlyCount(userData.monthly_delivery_count || 0);
                 });
 
-                // 2. Listen to Client's Requests
+                // 2. Requests
                 const q = query(collection(db, "requests"), where("clientEmail", "==", user.email));
                 unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
                     const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                     setJobs(docs);
                 });
-                
                 return () => { unsubscribeUser(); unsubscribeSnapshot(); };
             } else {
                 setJobs([]); setStamps(0); setRewardCount(0); setMonthlyCount(0); setUseRewardOnThisJob(false);
@@ -112,29 +109,44 @@ export default function ClientDash() {
         return { isValid: true, error: null };
     };
 
+    // --- TOTAL CALCULATION (With Rounding) ---
     const calculateTotal = () => {
-        const base = parseFloat(formData.amount) || 0;
+        // 1. Get Base Price (Already Rounded to 5 in utils)
+        const { price, isQuote } = calculatePrice(formData.distIndex, formData.weightIndex);
+        
+        if (isQuote) {
+            return { total: 0, subtotal: 0, surcharge: 0, isLate: false, discount: 0, isQuote: true };
+        }
+
+        // 2. Check Surcharge
         const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
         let hour24 = parseInt(formData.hour);
         if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
         if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
         const isLate = isToday && hour24 >= 14; 
         
-        let subtotal = base;
+        let subtotal = price;
         let surcharge = 0;
         let discount = 0;
 
-        if (isLate) { surcharge = base * 0.5; subtotal += surcharge; }
+        if (isLate) { 
+            // ROUND SURCHARGE TO NEAREST 5
+            // Ensures Base (rounded) + Surcharge (rounded) = Total (rounded)
+            const rawSurcharge = price * 0.5;
+            surcharge = Math.round(rawSurcharge / 5) * 5; 
+            subtotal += surcharge; 
+        }
         
+        // 3. Apply Discount
         if (useRewardOnThisJob && rewardCount > 0) {
             discount = Math.min(subtotal, REWARD_VALUE);
-            subtotal = subtotal - discount;
+            subtotal = Math.max(0, subtotal - discount);
         }
 
-        return { total: subtotal, subtotal: subtotal, surcharge: surcharge, isLate: isLate, discount: discount };
+        return { total: subtotal, subtotal: subtotal, surcharge, isLate, discount, isQuote: false };
     };
     
-    const { total, subtotal, surcharge, isLate, discount } = calculateTotal();
+    const { total, subtotal, surcharge, isLate, discount, isQuote } = calculateTotal();
     const timeStatus = getTimeValidation();
 
     const handlePhoneInput = (val, field) => {
@@ -145,135 +157,77 @@ export default function ClientDash() {
     const handleEdit = (job) => {
         setEditingId(job.id);
         const isNA = job.purchaseOrder === 'N/A';
+        
+        // Convert stored labels back to indices
+        const dIndex = DISTANCE_OPTIONS.findIndex(o => o.label === job.distanceLabel);
+        const wIndex = WEIGHT_OPTIONS.findIndex(o => o.label === job.weightLabel);
+
         setFormData({
             ...job, paymentMethod: job.paymentMethod || 'cash',
             acceptSurcharge: job.totalAmount > job.amount, 
             poType: isNA ? 'na' : 'entry',
-            purchaseOrder: isNA ? '' : job.purchaseOrder
+            purchaseOrder: isNA ? '' : job.purchaseOrder,
+            distIndex: dIndex !== -1 ? dIndex : 2, 
+            weightIndex: wIndex !== -1 ? wIndex : 0
         });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     
-    const openCounterModal = (job) => {
-        setCounteringJob(job);
-        const rejection = job.rejectionDetails || {};
-        setCounterNote(rejection.note || job.notes || '');
-        setCounterPrice(rejection.counterPrice || job.amount);
-        setCounterDate(rejection.counterTime?.date || job.date);
-        setCounterHour(rejection.counterTime?.hour || job.hour);
-        setCounterMinute(rejection.counterTime?.minute || job.minute);
-        setCounterAmpm(rejection.counterTime?.ampm || job.ampm);
+    const openCounterModal = (job) => { setCounteringJob(job); setCounterNote(job.rejectionDetails?.note || ''); setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); };
+    const handleSubmitCounterModal = async (e) => { 
+        e.preventDefault(); 
+        if(!confirm("Send counter offer?")) return; 
+        try { await updateDoc(doc(db, "requests", counteringJob.id), { 
+            status: 'pending', hasUnreadEdit: true, hasClientCountered: true, rejectionDetails: null, 
+            amount: parseFloat(counterPrice), totalAmount: parseFloat(counterPrice), notes: counterNote, updatedAt: serverTimestamp() 
+        }); alert("Sent!"); setCounteringJob(null); } catch(e) { alert(e.message); } 
     };
-    
-    const handleSubmitCounterModal = async (e) => {
-        e.preventDefault();
-        if (counteringJob.rejectionDetails?.reason === 'price' && !counterPrice) {
-            return alert("Please enter a new price for your counter-offer.");
-        }
-        if (counteringJob.rejectionDetails?.reason === 'time') {
-            if (!counterDate || !counterHour || !counterMinute) {
-                return alert("Please select a new date and time for your counter-offer.");
-            }
-        }
-        
-        if (!confirm("Are you sure you want to send this counter-offer? This is your final chance to modify the request after rejection.")) {
-            return;
-        }
-        
-        const job = counteringJob;
-        let updatedAmount = job.amount;
-        let updatedTotalAmount = job.totalAmount;
-        let updatedDate = job.date;
-        let updatedHour = job.hour;
-        let updatedMinute = job.minute;
-        let updatedAmpm = job.ampm;
-        
-        if (job.rejectionDetails?.reason === 'price') {
-            const newPrice = parseFloat(counterPrice);
-            updatedAmount = newPrice;
-            updatedTotalAmount = newPrice; 
-        }
-        if (job.rejectionDetails?.reason === 'time') {
-            updatedDate = counterDate;
-            updatedHour = counterHour;
-            updatedMinute = counterMinute;
-            updatedAmpm = counterAmpm;
-        }
-        
-        const payload = {
-            amount: updatedAmount,
-            totalAmount: updatedTotalAmount,
-            date: updatedDate,
-            hour: updatedHour,
-            minute: updatedMinute,
-            ampm: updatedAmpm,
-            notes: counterNote, 
-            status: 'pending', 
-            hasUnreadEdit: true,
-            hasClientCountered: true, 
-            rejectionDetails: null, 
-            updatedAt: serverTimestamp(),
-            pickupName: job.pickupName,
-            pickupPhone: job.pickupPhone,
-            from: job.from,
-            dropoffName: job.dropoffName,
-            dropoffPhone: job.dropoffPhone,
-            to: job.to,
-            paymentMethod: job.paymentMethod || 'cash',
-            purchaseOrder: job.purchaseOrder, 
-        };
-        
-        try {
-            await updateDoc(doc(db, "requests", job.id), payload);
-            alert("Counter Offer Sent! The request is now pending the Owner's review.");
-        } catch (e) {
-            alert("Error sending counter offer: " + e.message);
-        } finally {
-            setCounteringJob(null);
-        }
-    };
-
-    const handleAcceptCounter = async (job) => {
-        if (!confirm("Are you sure you want to accept the new terms?")) return;
-        const updates = { 
-            status: 'accepted', hasUnreadEdit: true, 
-            hasClientCountered: true, rejectionDetails: null 
-        };
-        if (job.rejectionDetails?.counterPrice) {
-            const counterPrice = parseFloat(job.rejectionDetails.counterPrice);
-            updates.amount = counterPrice; updates.totalAmount = counterPrice; 
-        }
-        if (job.rejectionDetails?.counterTime) {
-            const t = job.rejectionDetails.counterTime;
-            updates.date = t.date; updates.hour = t.hour; updates.minute = t.minute; updates.ampm = t.ampm;
-        }
-        updates.paymentMethod = job.paymentMethod || 'cash'; updates.acceptSurcharge = false; 
-
-        try { await updateDoc(doc(db, "requests", job.id), updates); alert("Offer Accepted! Job is now active."); } 
-        catch { alert("Error accepting offer."); }
+    const handleAcceptCounter = async (job) => { 
+        if (!confirm("Accept new terms?")) return;
+        const updates = { status: 'accepted', hasUnreadEdit: true, hasClientCountered: true, rejectionDetails: null };
+        if (job.rejectionDetails?.counterPrice) { updates.amount = parseFloat(job.rejectionDetails.counterPrice); updates.totalAmount = parseFloat(job.rejectionDetails.counterPrice); }
+        if (job.rejectionDetails?.counterTime) { const t = job.rejectionDetails.counterTime; updates.date = t.date; updates.hour = t.hour; updates.minute = t.minute; updates.ampm = t.ampm; }
+        try { await updateDoc(doc(db, "requests", job.id), updates); alert("Accepted!"); } catch { alert("Error."); }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (formData.pickupPhone.length < 9) return alert("Pickup Phone must be 9 digits.");
-        if (formData.dropoffPhone.length < 9) return alert("Dropoff Phone must be 9 digits.");
+        if (isQuote) return alert("Please call us for a special quote on this delivery.");
+        if (formData.pickupPhone.length < 9 || formData.dropoffPhone.length < 9) return alert("Phone numbers must be 9 digits.");
         if (!timeStatus.isValid) return alert(`Cannot submit: ${timeStatus.error}`);
-        if (isLate && !formData.acceptSurcharge) return alert("For same-day delivery after 2 PM, you must accept the surcharge.");
-        if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Please enter a Purchase Order number or select N/A.");
-        if (useRewardOnThisJob && discount === 0 && parseFloat(formData.amount) > 0) {
-            return alert("Reward is selected, but discount is $0. Ensure you have entered an Offer Amount.");
-        }
+        if (isLate && !formData.acceptSurcharge) return alert("You must accept the surcharge for late same-day delivery.");
+        if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Enter PO or select N/A.");
 
         setLoading(true);
         try {
             const finalPO = formData.poType === 'na' ? "N/A" : formData.purchaseOrder;
+            
+            const distLabel = DISTANCE_OPTIONS[formData.distIndex].label;
+            const weightLabel = WEIGHT_OPTIONS[formData.weightIndex].label;
+
             const payload = {
-                ...formData, purchaseOrder: finalPO, amount: parseFloat(formData.amount),
-                surcharge: surcharge, totalAmount: total, clientEmail: auth.currentUser.email,
-                clientId: auth.currentUser.uid, status: 'pending', updatedAt: serverTimestamp(),
+                ...formData, 
+                purchaseOrder: finalPO, 
+                
+                // Reconstruct Base Price from the Final Total
+                // Total = (Base + Surcharge - Discount)
+                // Base = Total + Discount - Surcharge
+                amount: subtotal + discount - surcharge, 
+                surcharge: surcharge, 
+                totalAmount: total, 
+                
+                distanceLabel: distLabel,
+                weightLabel: weightLabel,
+
+                clientEmail: auth.currentUser.email,
+                clientId: auth.currentUser.uid, 
+                status: 'pending', 
+                updatedAt: serverTimestamp(),
                 rewardUsed: useRewardOnThisJob && discount > 0,
             };
             delete payload.poType; 
+            delete payload.distIndex;
+            delete payload.weightIndex;
 
             if (!editingId) {
                 payload.createdAt = serverTimestamp();
@@ -283,23 +237,18 @@ export default function ClientDash() {
                 if (payload.rewardUsed) {
                     await updateDoc(doc(db, "users", auth.currentUser.uid), { rewardCount: rewardCount - 1 });
                     setUseRewardOnThisJob(false); 
-                    alert(`Reward claimed! $${discount.toFixed(2)} discount applied. One banked delivery used.`);
                 }
             } else {
                 payload.hasUnreadEdit = true;
-                const jobToEdit = jobs.find(j => j.id === editingId);
-                if (jobToEdit && jobToEdit.status === 'rejected' && !jobToEdit.hasClientCountered) {
-                    payload.hasClientCountered = true; payload.rejectionDetails = null; 
-                }
                 await updateDoc(doc(db, "requests", editingId), payload);
                 alert("Request Updated!"); setEditingId(null);
             }
             
-            // RESET FORM
             setFormData({ pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
-                notes: '', amount: '', paymentMethod: 'cash', 
+                notes: '', paymentMethod: 'cash', 
                 date: getTomorrowDate(),
-                hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry'
+                hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
+                distIndex: 2, weightIndex: 0
             });
         } catch (e) {
             alert("Error: " + e.message);
@@ -311,7 +260,6 @@ export default function ClientDash() {
     return (
         <div className="max-w-6xl mx-auto px-4 py-6">
             <ProofViewModal viewProofJob={viewProofJob} setViewProofJob={setViewProofJob} />
-            
             <CounterOfferModal
                 counteringJob={counteringJob} setCounteringJob={setCounteringJob} handleSubmitCounterModal={handleSubmitCounterModal}
                 counterNote={counterNote} setCounterNote={setCounterNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice}
@@ -322,11 +270,9 @@ export default function ClientDash() {
             <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
                 <div className="md:col-span-1 order-1">
                     <div className="space-y-4">
-                        
-                        {/* 1. GAMIFICATION BAR (TIER STATUS) */}
-                        {/* ID Added for Tutorial */}
                         <div id="gamification-bar-target" className="relative">
                             <GamificationBar monthlyDeliveryCount={monthlyCount} />
+                            {/* Info Icon for Tiers */}
                             <div 
                                 className="absolute top-2 right-2 z-10 group cursor-pointer"
                                 onClick={() => navigate('/tier-program')}
@@ -343,12 +289,12 @@ export default function ClientDash() {
                         </div>
 
                         <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
-                            {/* 2. LOYALTY CARD */}
                             <div id="loyalty-card-target" className="relative">
                                 <LoyaltyCard 
                                     stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob}
                                     setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} 
                                 />
+                                {/* Info Icon for Loyalty */}
                                 <div 
                                     className="absolute top-2 right-2 z-10 group cursor-pointer"
                                     onClick={() => navigate('/loyalty-program')}
@@ -364,12 +310,12 @@ export default function ClientDash() {
                                 </div>
                             </div>
                             
-                            {/* 3. REQUEST FORM */}
                             <div id="request-form-target">
                                 <RequestForm
                                     formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput}
                                     timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount}
                                     editingId={editingId} loading={loading}
+                                    isQuote={isQuote}
                                 />
                             </div>
                         </div>

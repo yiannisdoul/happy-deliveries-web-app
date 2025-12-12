@@ -1,10 +1,14 @@
 import React from 'react';
-import { FileText, Clock, DollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
+import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info } from 'lucide-react';
+import { DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../../utils/pricingCalculator';
 
 export default function RequestForm({ 
     formData, setFormData, handleSubmit, handlePhoneInput, 
-    timeStatus, isLate, total, subtotal, discount, editingId, loading 
+    timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote 
 }) {
+    const currentDist = DISTANCE_OPTIONS[formData.distIndex];
+    const currentWeight = WEIGHT_OPTIONS[formData.weightIndex];
+
     return (
         <>
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
@@ -43,6 +47,48 @@ export default function RequestForm({
                     <input required placeholder="Address (To)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.to} onChange={e => setFormData({...formData, to: e.target.value})} />
                 </div>
                 
+                {/* Distance & Weight Sliders */}
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-4">
+                    
+                    {/* Distance Slider */}
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-bold text-blue-800 uppercase">Est. Distance</label>
+                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">
+                                {currentDist.label}
+                            </span>
+                        </div>
+                        <input 
+                            type="range" 
+                            min="0" 
+                            max={DISTANCE_OPTIONS.length - 1} 
+                            step="1"
+                            value={formData.distIndex}
+                            onChange={(e) => setFormData({...formData, distIndex: parseInt(e.target.value)})}
+                            className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+                    </div>
+
+                    {/* Weight Slider */}
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-bold text-blue-800 uppercase">Total Weight</label>
+                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">
+                                {currentWeight.label}
+                            </span>
+                        </div>
+                        <input 
+                            type="range" 
+                            min="0" 
+                            max={WEIGHT_OPTIONS.length - 1} 
+                            step="1"
+                            value={formData.weightIndex}
+                            onChange={(e) => setFormData({...formData, weightIndex: parseInt(e.target.value)})}
+                            className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+                    </div>
+                </div>
+
                 {/* Date & Time Section */}
                 <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-gray-500 uppercase mt-1">Date & Time</label>
@@ -70,38 +116,75 @@ export default function RequestForm({
                     </div>
                 </div>
                 
-                {/* Amount and Total Calculation */}
-                {timeStatus.isValid ? (
-                    <div id="total-section-target">
-                        <div className="relative rounded shadow-sm">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center"><DollarSign className="h-4 w-4 text-gray-400" /></div>
-                            <input type="number" required className="pl-8 w-full border rounded py-2 text-sm" placeholder="Offer Amount ($)" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
-                        </div>
-                        
-                        {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100">
-                            <p className="font-bold">Price before discount: ${subtotal.toFixed(2)} (+50% Surcharge)</p>
-                            <label className="flex items-center mt-1">
-                                <input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept
-                            </label>
-                        </div>}
-                        
-                        {discount > 0 ? (
-                            <div className="mt-3 bg-green-50 p-3 rounded border border-green-100">
-                                <p className="text-green-800 font-bold text-sm">REWARD APPLIED: -${discount.toFixed(2)}</p>
-                                <p className="text-lg font-bold text-green-700">FINAL TOTAL: ${total.toFixed(2)}</p>
+                {/* Pricing & Quote UI */}
+                {isQuote ? (
+                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow-sm animate-pulse">
+                        <div className="flex items-center">
+                            <PhoneCall className="h-6 w-6 text-yellow-600 mr-3" />
+                            <div>
+                                <p className="font-bold text-yellow-900">Special Quote Required</p>
+                                <p className="text-xs text-yellow-800 mt-1">This job exceeds our standard sizing. Please call us to arrange a custom quote.</p>
+                                <a href="tel:+61420882302" className="block mt-2 font-bold text-blue-600 text-lg hover:underline">+61 420 882 302</a>
                             </div>
-                        ) : (
-                            <p className="text-sm text-gray-500 font-bold mt-2">Total Estimate: ${total.toFixed(2)}</p>
-                        )}
-                        
+                        </div>
                     </div>
                 ) : (
-                    <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse">
-                        <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
-                        <p className="text-red-800 font-bold text-sm">Cannot Complete Request</p>
-                        <p className="text-red-600 text-xs mt-1">{timeStatus.error}</p>
-                        <p className="text-red-600 text-xs mt-1">Please select a different time.</p>
-                    </div>
+                    timeStatus.isValid ? (
+                        <div id="total-section-target" className="space-y-3">
+                            {/* Price is now calculated automatically */}
+                            <div className="bg-gray-100 p-3 rounded-lg text-center border border-gray-200">
+                                <p className="text-xs text-gray-500 uppercase font-bold">Estimated Base Price</p>
+                                <p className="text-2xl font-bold text-gray-800">${total > 0 ? (isLate ? (subtotal-surcharge).toFixed(2) : subtotal.toFixed(2)) : '0.00'}</p>
+                            </div>
+                            
+                            {/* POLICY NOTE - Added as requested */}
+                            <div className="px-3 py-2 bg-blue-50 rounded border border-blue-100 flex items-start">
+                                <Info className="w-4 h-4 text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
+                                <p className="text-xs text-blue-800">
+                                    <strong>Note:</strong> This is an initial offer. The Owner may accept or reject based on availability. 
+                                    If rejected, you will have <strong>one chance</strong> to negotiate a new price or time.
+                                </p>
+                            </div>
+                            
+                            {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100">
+                                <p className="font-bold">Price before discount: ${subtotal.toFixed(2)} (+50% Surcharge)</p>
+                                <label className="flex items-center mt-1">
+                                    <input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept
+                                </label>
+                            </div>}
+                            
+                            {discount > 0 ? (
+                                <div className="mt-3 bg-green-50 p-3 rounded border border-green-100 relative overflow-hidden">
+                                    <div className="relative z-10">
+                                        <p className="text-green-800 font-bold text-sm flex items-center">
+                                            <CheckCircle className="w-4 h-4 mr-1" /> REWARD APPLIED
+                                        </p>
+                                        <p className="text-xs text-green-700 mt-0.5">
+                                            -${discount.toFixed(2)} (Max capped at $160)
+                                        </p>
+                                        <div className="mt-2 pt-2 border-t border-green-200">
+                                            <p className="text-xs text-green-700 uppercase font-bold">Total to Pay</p>
+                                            <p className="text-2xl font-extrabold text-green-800">${total.toFixed(2)}</p>
+                                        </div>
+                                    </div>
+                                    {/* Subtle alert if partial value used */}
+                                    {subtotal < 160 && (
+                                        <p className="mt-2 text-[10px] text-green-800 italic opacity-80">
+                                            Note: Delivery cost is under $160. Remaining reward value is not carried over.
+                                        </p>
+                                    )}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-gray-500 font-bold mt-2 text-right">Total: ${total.toFixed(2)}</p>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse">
+                            <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+                            <p className="text-red-800 font-bold text-sm">Cannot Complete Request</p>
+                            <p className="text-red-600 text-xs mt-1">{timeStatus.error}</p>
+                        </div>
+                    )
                 )}
                 
                 {/* Notes */}
@@ -111,8 +194,8 @@ export default function RequestForm({
                 </div>
                 
                 {/* Submit Button */}
-                <button type="submit" disabled={loading || !timeStatus.isValid} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${!timeStatus.isValid ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                    {loading ? 'Processing...' : (editingId ? 'Update Request' : 'Submit Request')}
+                <button type="submit" disabled={loading || !timeStatus.isValid || isQuote} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${(!timeStatus.isValid || isQuote) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                    {loading ? 'Processing...' : (isQuote ? 'Call to Book' : (editingId ? 'Update Request' : 'Submit Request'))}
                 </button>
             </form>
         </>

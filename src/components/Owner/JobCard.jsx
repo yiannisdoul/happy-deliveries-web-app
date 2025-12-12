@@ -1,10 +1,8 @@
 import React from 'react';
 import { 
     CheckCircle, XCircle, Calendar, AlertCircle, User, PenTool, 
-    X, DollarSign, Clock, Package, Edit2, Star, ArrowRight, MapPin, FileText
+    X, Package, Star, Clock, Truck, Scale
 } from 'lucide-react'; 
-
-// Define utility functions *inside* the JobCard file to resolve 'no-unused-vars' linter error
 
 const getStatusBadge = (status) => {
     switch(status) {
@@ -23,14 +21,12 @@ const createGoogleCalendarLink = (job, clientInfo = {}) => {
     const formatTime = (h, m) => `${job.date.replace(/-/g, '')}T${h.toString().padStart(2, '0')}${m}00`;
     const phoneDisplay = clientInfo.phone ? `+61 ${clientInfo.phone}` : 'No Phone';
     const clientName = clientInfo.fullName || 'Unknown';
-    const clientInfoStr = `${clientName} (${phoneDisplay})`;
     
     const title = encodeURIComponent(`Delivery: ${job.from} --> ${job.to}`);
-    const details = encodeURIComponent(`CLIENT: ${clientInfoStr}\nPrice: $${job.totalAmount||job.amount}\nPO: ${job.purchaseOrder||'N/A'}\nPickup: ${job.from}\nDrop: ${job.to}\nNotes: ${job.notes}`);
+    const details = encodeURIComponent(`CLIENT: ${clientName} (${phoneDisplay})\nDetails: ${job.distanceLabel || ''} / ${job.weightLabel || ''}\nPrice: $${job.totalAmount||job.amount}\nPO: ${job.purchaseOrder||'N/A'}\nNotes: ${job.notes}`);
     
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${formatTime(hour, job.minute)}/${formatTime(hour + 1, job.minute)}`;
 };
-
 
 export default function JobCard({ job, clientInfo = {}, handleStatus, openRejectionModal, setDeliveringJobId, setViewProofJob, handleMarkAsReviewed }) {
     const clientName = clientInfo.fullName || 'Unknown Client';
@@ -60,7 +56,6 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
             )}
             
             <div className="p-4 sm:p-5">
-                {/* FIX: Use getStatusBadge here to resolve the linter error and show status clearly */}
                 <div className="mb-3">{getStatusBadge(job.status)}</div>
                 
                 <div className="flex justify-between items-start gap-2">
@@ -87,11 +82,7 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                     ) : (
                         <div className="flex flex-col items-end gap-2">
                             <span className={`px-3 py-1 text-xs rounded-full font-bold uppercase ${job.status === 'delivered' ? 'bg-slate-200 text-slate-600' : 'bg-red-100 text-red-800'}`}>{job.status}</span>
-                            {job.status === 'rejected' && job.hasClientCountered && <span className="text-xs text-blue-600 font-bold mt-1">Client Negotiated</span>}
                             {job.status === 'delivered' && <button onClick={() => setViewProofJob(job)} className="flex items-center bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1.5 rounded-lg text-xs font-bold transition"><Package className="h-3 w-3 mr-1" /> Proof</button>}
-                            {job.status === 'rejected' && (
-                                <button onClick={() => openRejectionModal(job)} className="p-2 bg-red-50 text-red-400 rounded-full cursor-not-allowed transition" title="Already Rejected" disabled><XCircle className="h-6 w-6 sm:h-8 sm:w-8" /></button>
-                            )}
                         </div>
                     )}
                 </div>
@@ -110,19 +101,26 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                         </div>
                     </div>
                     
+                    {/* NEW: DISPLAY DISTANCE & WEIGHT FOR OWNER */}
+                    {job.distanceLabel && job.weightLabel && (
+                        <div className="flex gap-3 text-xs font-bold text-slate-700 bg-slate-100 p-2 rounded justify-center sm:justify-start">
+                            <span className="flex items-center"><Truck className="h-3 w-3 mr-1 text-slate-500"/> {job.distanceLabel}</span>
+                            <span className="flex items-center"><Scale className="h-3 w-3 mr-1 text-slate-500"/> {job.weightLabel}</span>
+                        </div>
+                    )}
+
                     {job.purchaseOrder && <div className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded inline-block"><strong>PO:</strong> {job.purchaseOrder}</div>}
                     {job.notes && <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 italic border border-gray-100">"{job.notes}"</div>}
                     
                     {job.status === 'rejected' && job.rejectionDetails && (
                         <div className="bg-red-50 border border-red-100 p-3 rounded text-sm">
                             <p className="text-red-800 font-bold mb-1">Rejection Reason:</p>
-                            <p className="text-gray-700">{job.rejectionDetails.reason === 'price' ? 'Price not accepted' : job.rejectionDetails.reason === 'time' ? 'Time not suitable' : 'Other'}</p>
+                            <p className="text-gray-700">{job.rejectionDetails.reason}</p>
                             {job.rejectionDetails.note && <p className="text-gray-600 italic mt-1">"{job.rejectionDetails.note}"</p>}
                             {job.rejectionDetails.counterPrice && <p className="text-blue-600 font-bold mt-2">Proposed Price: ${job.rejectionDetails.counterPrice}</p>}
-                            {job.rejectionDetails.counterTime && <p className="text-blue-600 font-bold mt-2">Proposed Time: {job.rejectionDetails.counterTime.date} @ {job.rejectionDetails.counterTime.hour}:{job.rejectionDetails.counterTime.minute} {job.rejectionDetails.counterTime.ampm}</p>}
                         </div>
                     )}
-                    {job.rewardUsed && <div className="mt-3 bg-green-50 text-green-800 text-xs px-2 py-1 rounded inline-block font-bold flex items-center"><Star className="h-3 w-3 mr-1 fill-green-800 text-green-800"/> REWARD CLAIMED ON THIS DELIVERY</div>}
+                    {job.rewardUsed && <div className="mt-3 bg-green-50 text-green-800 text-xs px-2 py-1 rounded inline-block font-bold flex items-center"><Star className="h-3 w-3 mr-1 fill-green-800 text-green-800"/> REWARD CLAIMED</div>}
                 </div>
                 
                 {job.status === 'accepted' && job.date && (

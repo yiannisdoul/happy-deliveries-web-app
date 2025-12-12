@@ -1,5 +1,5 @@
 import React from 'react';
-import { XCircle, Edit2, X, DollarSign, Clock } from 'lucide-react'; 
+import { XCircle, Edit2, X, DollarSign, Clock, AlertTriangle } from 'lucide-react'; 
 
 export default function CounterOfferModal({
     counteringJob, setCounteringJob, handleSubmitCounterModal,
@@ -19,9 +19,19 @@ export default function CounterOfferModal({
                  <button onClick={() => setCounteringJob(null)} className="text-gray-400 hover:text-gray-600"><X /></button>
               </div>
               
+              {/* WARNING BANNER */}
+              <div className="bg-amber-50 border-l-4 border-amber-500 p-3 mb-4 rounded-r">
+                  <div className="flex items-start">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 mr-2 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-amber-900 leading-tight">
+                          <strong>Warning:</strong> This is your <u>only chance</u> to renegotiate. 
+                          If this offer is rejected, this request will be closed.
+                      </p>
+                  </div>
+              </div>
+              
               <p className="text-sm text-gray-700 mb-3">
-                  The Owner rejected your request due to <span className="font-semibold text-red-600">{rejectionReason}</span>. 
-                  Use this one-time chance to modify the job details.
+                  The Owner rejected due to <span className="font-semibold text-red-600">{rejectionReason}</span>. 
               </p>
               
               <form onSubmit={handleSubmitCounterModal} className="space-y-4">

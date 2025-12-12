@@ -1,8 +1,12 @@
-// Constants shared across components
-export const STAMP_MAX = 10;
-export const REWARD_VALUE = 160; // UPDATED DISCOUNT VALUE
+// src/utils/constants.js
 
-// Cloudinary Constants (for OwnerDash/DeliveryModal, kept here for consistency)
+// Reward Value matches the price of a standard 50-75km (<1t) delivery
+export const REWARD_VALUE = 160; 
+
+// Default stamp max (fallback for new users before tier calc)
+export const STAMP_MAX = 10;
+
+// Cloudinary Constants
 export const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 export const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
