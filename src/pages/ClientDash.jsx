@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 // UTILS
 import { checkAndPerformReset } from '../utils/resetLogic';
 import { calculatePrice, DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../utils/pricingCalculator';
+import { calculateJobDuration, getMinutesFromMidnight } from '../utils/timeBlocking';
 
 // COMPONENTS
 import LoyaltyCard from '../components/Client/LoyaltyCard';
@@ -31,6 +32,9 @@ export default function ClientDash() {
     const [loading, setLoading] = useState(false);
     const [viewProofJob, setViewProofJob] = useState(null);
     
+    // --- TIME BLOCKING STATE ---
+    const [busyIntervals, setBusyIntervals] = useState([]); 
+    
     // --- LOYALTY & GAMIFICATION STATE ---
     const [stamps, setStamps] = useState(0); 
     const [rewardCount, setRewardCount] = useState(0); 
@@ -47,7 +51,6 @@ export default function ClientDash() {
     const [counterAmpm, setCounterAmpm] = useState('AM');
 
     // --- FORM DATA ---
-    // Defaults: Distance Index 2 (50-75km), Weight Index 0 (<1t) -> $160
     const [formData, setFormData] = useState({
         pickupName: '', pickupPhone: '', from: '',
         dropoffName: '', dropoffPhone: '', to: '',
@@ -60,27 +63,33 @@ export default function ClientDash() {
         weightIndex: 0
     });
 
+    // 1. MAIN DATA FETCHING (User Profile & Their Own Jobs)
     useEffect(() => {
         let unsubscribeSnapshot = () => {};
+        
         const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
             if (user) {
-                // 1. User Profile
+                // Fetch User Profile
                 const userRef = doc(db, "users", user.uid);
                 const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
                     const userData = userDoc.data() || {};
+                    // Run logic to check if a new month started and reset stamps/tiers if needed
                     checkAndPerformReset({ uid: user.uid, ...userData }); 
+                    
                     setStamps(userData.stamps || 0);
                     setRewardCount(userData.rewardCount || 0); 
                     setMonthlyCount(userData.monthly_delivery_count || 0);
                 });
 
-                // 2. Requests
+                // Fetch Client's Own Requests
                 const q = query(collection(db, "requests"), where("clientEmail", "==", user.email));
                 unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
                     const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Sort by createdAt descending (newest first)
                     docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                     setJobs(docs);
                 });
+                
                 return () => { unsubscribeUser(); unsubscribeSnapshot(); };
             } else {
                 setJobs([]); setStamps(0); setRewardCount(0); setMonthlyCount(0); setUseRewardOnThisJob(false);
@@ -88,6 +97,48 @@ export default function ClientDash() {
         });
         return () => unsubscribeAuth();
     }, []);
+
+    // 2. TIME BLOCKING FETCHING (All Active Jobs on Selected Date)
+    useEffect(() => {
+        if (!formData.date) return;
+
+        // Query ALL requests for the selected date to find conflicts
+        const q = query(collection(db, "requests"), where("date", "==", formData.date));
+        
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const intervals = [];
+            
+            snapshot.docs.forEach(doc => {
+                const job = doc.data();
+                
+                // Ignore rejected jobs (they don't block time)
+                // Ignore the job currently being edited (so you don't block yourself moving your own job)
+                if (job.status === 'rejected' || doc.id === editingId) return;
+
+                // 1. Calculate Start Time (Minutes from midnight)
+                const startMins = getMinutesFromMidnight(job.hour, job.minute, job.ampm);
+
+                // 2. Reconstruct Indices for calculation (Fallback to defaults if missing)
+                let dIndex = DISTANCE_OPTIONS.findIndex(o => o.label === job.distanceLabel);
+                if (dIndex === -1) dIndex = 2; // Default 50-75km
+                
+                let wIndex = WEIGHT_OPTIONS.findIndex(o => o.label === job.weightLabel);
+                if (wIndex === -1) wIndex = 0; // Default <1t
+
+                // 3. Calculate Duration using the Utility
+                const duration = calculateJobDuration(dIndex, wIndex, job.date, job.hour, job.ampm);
+                
+                // 4. Add to Busy Intervals
+                intervals.push({ start: startMins, end: startMins + duration });
+            });
+            
+            setBusyIntervals(intervals);
+        }, (error) => {
+            console.error("Error fetching time slots (Check Firestore Rules):", error);
+        });
+
+        return () => unsubscribe();
+    }, [formData.date, editingId]); 
 
     const filteredJobs = jobs.filter(job => {
         if (filter === 'all') return true;
@@ -103,22 +154,22 @@ export default function ClientDash() {
         const now = new Date();
         const diffMs = bookingTime - now;
         const diffHours = diffMs / (1000 * 60 * 60);
+        
         if (diffMs < 0) return { isValid: false, error: "Time cannot be in the past." };
         if (diffHours < 2) return { isValid: false, error: "Too Soon: We require at least 2 hours notice." };
         if (hour24 >= 18 || hour24 < 7) return { isValid: false, error: "Closed: We operate between 7:00 AM and 6:00 PM." };
         return { isValid: true, error: null };
     };
 
-    // --- TOTAL CALCULATION (With Rounding) ---
     const calculateTotal = () => {
-        // 1. Get Base Price (Already Rounded to 5 in utils)
+        // 1. Base Price
         const { price, isQuote } = calculatePrice(formData.distIndex, formData.weightIndex);
         
         if (isQuote) {
             return { total: 0, subtotal: 0, surcharge: 0, isLate: false, discount: 0, isQuote: true };
         }
 
-        // 2. Check Surcharge
+        // 2. Surcharge Logic
         const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
         let hour24 = parseInt(formData.hour);
         if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
@@ -130,14 +181,12 @@ export default function ClientDash() {
         let discount = 0;
 
         if (isLate) { 
-            // ROUND SURCHARGE TO NEAREST 5
-            // Ensures Base (rounded) + Surcharge (rounded) = Total (rounded)
             const rawSurcharge = price * 0.5;
             surcharge = Math.round(rawSurcharge / 5) * 5; 
             subtotal += surcharge; 
         }
         
-        // 3. Apply Discount
+        // 3. Discount Logic
         if (useRewardOnThisJob && rewardCount > 0) {
             discount = Math.min(subtotal, REWARD_VALUE);
             subtotal = Math.max(0, subtotal - discount);
@@ -158,7 +207,6 @@ export default function ClientDash() {
         setEditingId(job.id);
         const isNA = job.purchaseOrder === 'N/A';
         
-        // Convert stored labels back to indices
         const dIndex = DISTANCE_OPTIONS.findIndex(o => o.label === job.distanceLabel);
         const wIndex = WEIGHT_OPTIONS.findIndex(o => o.label === job.weightLabel);
 
@@ -173,21 +221,78 @@ export default function ClientDash() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     
-    const openCounterModal = (job) => { setCounteringJob(job); setCounterNote(job.rejectionDetails?.note || ''); setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); };
+    // --- COUNTER MODAL HANDLERS ---
+    const openCounterModal = (job) => { 
+        setCounteringJob(job); 
+        setCounterNote(job.rejectionDetails?.note || ''); 
+        setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); 
+        if (job.rejectionDetails?.counterTime) {
+            setCounterDate(job.rejectionDetails.counterTime.date);
+            setCounterHour(job.rejectionDetails.counterTime.hour);
+            setCounterMinute(job.rejectionDetails.counterTime.minute);
+            setCounterAmpm(job.rejectionDetails.counterTime.ampm);
+        }
+    };
+
     const handleSubmitCounterModal = async (e) => { 
         e.preventDefault(); 
-        if(!confirm("Send counter offer?")) return; 
-        try { await updateDoc(doc(db, "requests", counteringJob.id), { 
-            status: 'pending', hasUnreadEdit: true, hasClientCountered: true, rejectionDetails: null, 
-            amount: parseFloat(counterPrice), totalAmount: parseFloat(counterPrice), notes: counterNote, updatedAt: serverTimestamp() 
-        }); alert("Sent!"); setCounteringJob(null); } catch(e) { alert(e.message); } 
+        if(!confirm("Are you sure you want to send this counter-offer?")) return; 
+        
+        try { 
+            const updates = { 
+                status: 'pending', 
+                hasUnreadEdit: true, 
+                hasClientCountered: true, 
+                rejectionDetails: null, 
+                updatedAt: serverTimestamp(),
+                notes: counterNote
+            };
+
+            if (counteringJob.rejectionDetails?.reason === 'price') {
+                updates.amount = parseFloat(counterPrice);
+                updates.totalAmount = parseFloat(counterPrice);
+            } else if (counteringJob.rejectionDetails?.reason === 'time') {
+                updates.date = counterDate;
+                updates.hour = counterHour;
+                updates.minute = counterMinute;
+                updates.ampm = counterAmpm;
+            }
+
+            await updateDoc(doc(db, "requests", counteringJob.id), updates); 
+            alert("Counter Offer Sent!"); 
+            setCounteringJob(null); 
+        } catch(e) { 
+            alert("Error sending counter: " + e.message); 
+        } 
     };
+
     const handleAcceptCounter = async (job) => { 
-        if (!confirm("Accept new terms?")) return;
-        const updates = { status: 'accepted', hasUnreadEdit: true, hasClientCountered: true, rejectionDetails: null };
-        if (job.rejectionDetails?.counterPrice) { updates.amount = parseFloat(job.rejectionDetails.counterPrice); updates.totalAmount = parseFloat(job.rejectionDetails.counterPrice); }
-        if (job.rejectionDetails?.counterTime) { const t = job.rejectionDetails.counterTime; updates.date = t.date; updates.hour = t.hour; updates.minute = t.minute; updates.ampm = t.ampm; }
-        try { await updateDoc(doc(db, "requests", job.id), updates); alert("Accepted!"); } catch { alert("Error."); }
+        if (!confirm("Are you sure you want to accept the new terms?")) return;
+        const updates = { 
+            status: 'accepted', 
+            hasUnreadEdit: true, 
+            hasClientCountered: true, 
+            rejectionDetails: null 
+        };
+        
+        if (job.rejectionDetails?.counterPrice) { 
+            updates.amount = parseFloat(job.rejectionDetails.counterPrice); 
+            updates.totalAmount = parseFloat(job.rejectionDetails.counterPrice); 
+        }
+        if (job.rejectionDetails?.counterTime) { 
+            const t = job.rejectionDetails.counterTime; 
+            updates.date = t.date; 
+            updates.hour = t.hour; 
+            updates.minute = t.minute; 
+            updates.ampm = t.ampm; 
+        }
+        
+        try { 
+            await updateDoc(doc(db, "requests", job.id), updates); 
+            alert("Offer Accepted! Job is now active."); 
+        } catch { 
+            alert("Error accepting offer."); 
+        }
     };
 
     const handleSubmit = async (e) => {
@@ -209,9 +314,6 @@ export default function ClientDash() {
                 ...formData, 
                 purchaseOrder: finalPO, 
                 
-                // Reconstruct Base Price from the Final Total
-                // Total = (Base + Surcharge - Discount)
-                // Base = Total + Discount - Surcharge
                 amount: subtotal + discount - surcharge, 
                 surcharge: surcharge, 
                 totalAmount: total, 
@@ -225,8 +327,9 @@ export default function ClientDash() {
                 updatedAt: serverTimestamp(),
                 rewardUsed: useRewardOnThisJob && discount > 0,
             };
+            
             delete payload.poType; 
-            delete payload.distIndex;
+            delete payload.distIndex; 
             delete payload.weightIndex;
 
             if (!editingId) {
@@ -241,17 +344,21 @@ export default function ClientDash() {
             } else {
                 payload.hasUnreadEdit = true;
                 await updateDoc(doc(db, "requests", editingId), payload);
-                alert("Request Updated!"); setEditingId(null);
+                alert("Request Updated!"); 
+                setEditingId(null);
             }
             
-            setFormData({ pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
+            setFormData({ 
+                pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
                 notes: '', paymentMethod: 'cash', 
                 date: getTomorrowDate(),
-                hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
+                hour: '10', minute: '00', ampm: 'AM', 
+                acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
                 distIndex: 2, weightIndex: 0
             });
         } catch (e) {
-            alert("Error: " + e.message);
+            console.error(e);
+            alert("Error submitting request: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -268,23 +375,14 @@ export default function ClientDash() {
             />
 
             <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
+                {/* LEFT/TOP COLUMN */}
                 <div className="md:col-span-1 order-1">
                     <div className="space-y-4">
                         <div id="gamification-bar-target" className="relative">
                             <GamificationBar monthlyDeliveryCount={monthlyCount} />
-                            {/* Info Icon for Tiers */}
-                            <div 
-                                className="absolute top-2 right-2 z-10 group cursor-pointer"
-                                onClick={() => navigate('/tier-program')}
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path>
-                                    <path d="M12 17h.01"></path>
-                                </svg>
-                                <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">
-                                    View details on tiers, floors, and rollover protection.
-                                </div>
+                            <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/tier-program')}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
+                                <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">View details on tiers, floors, and rollover protection.</div>
                             </div>
                         </div>
 
@@ -294,19 +392,9 @@ export default function ClientDash() {
                                     stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob}
                                     setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} 
                                 />
-                                {/* Info Icon for Loyalty */}
-                                <div 
-                                    className="absolute top-2 right-2 z-10 group cursor-pointer"
-                                    onClick={() => navigate('/loyalty-program')}
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors">
-                                        <circle cx="12" cy="12" r="10"></circle>
-                                        <path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path>
-                                        <path d="M12 17h.01"></path>
-                                    </svg>
-                                    <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">
-                                        Details on stamp earning, rewards, and how tiers affect your goal.
-                                    </div>
+                                <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/loyalty-program')}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
+                                    <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">Details on stamp earning, rewards, and how tiers affect your goal.</div>
                                 </div>
                             </div>
                             
@@ -316,18 +404,26 @@ export default function ClientDash() {
                                     timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount}
                                     editingId={editingId} loading={loading}
                                     isQuote={isQuote}
+                                    busyIntervals={busyIntervals}
                                 />
                             </div>
                         </div>
                     </div>
                 </div>
 
+                {/* RIGHT/BOTTOM COLUMN: Jobs List */}
                 <div className="md:col-span-2 order-2 space-y-4" id="jobs-list-target">
                     <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
                         <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
                         <div className="flex flex-wrap justify-center sm:justify-end bg-gray-100 p-1 rounded-lg space-x-1" id="jobs-filter-target">
                             {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
-                                <button key={status} onClick={() => setFilter(status)} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
+                                <button 
+                                    key={status} 
+                                    onClick={() => setFilter(status)} 
+                                    className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    {status}
+                                </button>
                             ))}
                         </div>
                     </div>

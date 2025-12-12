@@ -1,17 +1,124 @@
-import React from 'react';
-import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info, Calendar as CalendarIcon, X, ChevronRight } from 'lucide-react';
 import { DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../../utils/pricingCalculator';
+import { getMinutesFromMidnight, isSlotBlocked } from '../../utils/timeBlocking'; 
 
+// --- INTERNAL COMPONENT: CALENDLY-STYLE TIME PICKER ---
+const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTime }) => {
+    if (!isOpen) return null;
+
+    // Generate slots: 7:00 AM to 6:00 PM in 30-min increments
+    const slots = [];
+    const startHour = 7;
+    const endHour = 18; // 6 PM
+
+    for (let h = startHour; h <= endHour; h++) {
+        for (let m = 0; m < 60; m += 30) {
+            // Skip 6:30 PM (End at 6:00 PM sharp)
+            if (h === 18 && m > 0) continue;
+
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            const displayHour = h > 12 ? h - 12 : h; // Convert 13->1, 12->12
+            const displayMinute = m === 0 ? '00' : '30';
+            
+            // Calculate absolute minutes for blocking check
+            // Note: Our helper expects "12" "00" "PM" format logic
+            const checkMins = (h * 60) + m; 
+            const isBlocked = isSlotBlocked(checkMins, busyIntervals);
+            const isSelected = selectedTime.hour === displayHour.toString() && 
+                               selectedTime.minute === displayMinute && 
+                               selectedTime.ampm === ampm;
+
+            slots.push({
+                hour: displayHour.toString(),
+                minute: displayMinute,
+                ampm: ampm,
+                label: `${displayHour}:${displayMinute} ${ampm}`,
+                isBlocked,
+                isSelected
+            });
+        }
+    }
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+                
+                {/* Modal Header */}
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <h3 className="font-bold text-gray-800 flex items-center">
+                        <Clock className="w-5 h-5 mr-2 text-blue-600"/> Select a Time
+                    </h3>
+                    <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition"><X className="w-5 h-5 text-gray-500"/></button>
+                </div>
+
+                {/* Legend */}
+                <div className="px-4 py-2 flex gap-4 text-xs font-medium text-gray-500 bg-white border-b border-gray-50">
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full border border-gray-300 mr-1.5"></span> Available</div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-gray-200 mr-1.5"></span> Booked</div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-blue-600 mr-1.5"></span> Selected</div>
+                </div>
+
+                {/* Slots Grid */}
+                <div className="p-4 overflow-y-auto grid grid-cols-2 gap-3">
+                    {slots.map((slot, index) => (
+                        <button
+                            key={index}
+                            disabled={slot.isBlocked}
+                            onClick={() => {
+                                onSelect(slot.hour, slot.minute, slot.ampm);
+                                onClose();
+                            }}
+                            className={`
+                                py-3 px-2 rounded-lg text-sm font-bold border transition-all relative
+                                ${slot.isBlocked 
+                                    ? 'bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed line-through decoration-gray-400' 
+                                    : slot.isSelected 
+                                        ? 'bg-blue-600 border-blue-600 text-white shadow-md ring-2 ring-blue-200' 
+                                        : 'bg-white border-gray-200 text-gray-700 hover:border-blue-400 hover:text-blue-600 hover:shadow-sm'
+                                }
+                            `}
+                        >
+                            {slot.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN REQUEST FORM COMPONENT ---
 export default function RequestForm({ 
     formData, setFormData, handleSubmit, handlePhoneInput, 
-    timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote 
+    timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote,
+    busyIntervals = [] 
 }) {
+    const [showTimePicker, setShowTimePicker] = useState(false);
     const currentDist = DISTANCE_OPTIONS[formData.distIndex];
     const currentWeight = WEIGHT_OPTIONS[formData.weightIndex];
+
+    const handleTimeSelect = (h, m, ampm) => {
+        setFormData(prev => ({
+            ...prev,
+            hour: h,
+            minute: m,
+            ampm: ampm
+        }));
+    };
 
     return (
         <>
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
+            
+            {/* BUSY STATUS BANNER */}
+            {busyIntervals.length > 0 && (
+                <div className="bg-orange-50 border-l-4 border-orange-400 p-2 mb-4 rounded-r text-xs text-orange-800 flex items-center animate-in fade-in slide-in-from-top-2">
+                    <CalendarIcon className="w-4 h-4 mr-2" />
+                    <span>Some slots are fully booked for this date.</span>
+                </div>
+            )}
+
             <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-5 rounded-r shadow-sm">
                 <div className="flex items-start">
                     <Clock className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
@@ -49,55 +156,59 @@ export default function RequestForm({
                 
                 {/* Distance & Weight Sliders */}
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-4">
-                    
-                    {/* Distance Slider */}
                     <div>
                         <div className="flex justify-between items-center mb-2">
                             <label className="text-xs font-bold text-blue-800 uppercase">Est. Distance</label>
-                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">
-                                {currentDist.label}
-                            </span>
+                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">{currentDist.label}</span>
                         </div>
-                        <input 
-                            type="range" 
-                            min="0" 
-                            max={DISTANCE_OPTIONS.length - 1} 
-                            step="1"
-                            value={formData.distIndex}
-                            onChange={(e) => setFormData({...formData, distIndex: parseInt(e.target.value)})}
-                            className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                        />
+                        <input type="range" min="0" max={DISTANCE_OPTIONS.length - 1} step="1" value={formData.distIndex} onChange={(e) => setFormData({...formData, distIndex: parseInt(e.target.value)})} className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
                     </div>
-
-                    {/* Weight Slider */}
                     <div>
                         <div className="flex justify-between items-center mb-2">
                             <label className="text-xs font-bold text-blue-800 uppercase">Total Weight</label>
-                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">
-                                {currentWeight.label}
-                            </span>
+                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">{currentWeight.label}</span>
                         </div>
-                        <input 
-                            type="range" 
-                            min="0" 
-                            max={WEIGHT_OPTIONS.length - 1} 
-                            step="1"
-                            value={formData.weightIndex}
-                            onChange={(e) => setFormData({...formData, weightIndex: parseInt(e.target.value)})}
-                            className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                        />
+                        <input type="range" min="0" max={WEIGHT_OPTIONS.length - 1} step="1" value={formData.weightIndex} onChange={(e) => setFormData({...formData, weightIndex: parseInt(e.target.value)})} className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
                     </div>
                 </div>
 
-                {/* Date & Time Section */}
+                {/* DATE & TIME SECTION (UPDATED) */}
                 <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-gray-500 uppercase mt-1">Date & Time</label>
-                    <input type="date" required className="w-full p-2 border rounded text-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+                    
                     <div className="flex gap-2">
-                        <select className="flex-1 p-2 border rounded text-sm bg-white" value={formData.hour} onChange={e => setFormData({...formData, hour: e.target.value})}>{[...Array(12)].map((_,i)=> <option key={i+1} value={i+1}>{i+1}</option>)}</select>
-                        <select className="flex-1 p-2 border rounded text-sm bg-white" value={formData.minute} onChange={e => setFormData({...formData, minute: e.target.value})}>{['00','15','30','45'].map(m => <option key={m} value={m}>{m}</option>)}</select>
-                        <select className="flex-1 p-2 border rounded text-sm bg-white" value={formData.ampm} onChange={e => setFormData({...formData, ampm: e.target.value})}><option>AM</option><option>PM</option></select>
+                        {/* Date Picker */}
+                        <div className="relative flex-1">
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" 
+                                value={formData.date} 
+                                onChange={e => setFormData({...formData, date: e.target.value})} 
+                            />
+                        </div>
+
+                        {/* Time Picker Button (Triggers Modal) */}
+                        <button 
+                            type="button"
+                            onClick={() => setShowTimePicker(true)}
+                            className="flex-1 bg-white border border-gray-300 text-gray-700 font-bold py-3 px-4 rounded-lg shadow-sm hover:bg-gray-50 hover:border-blue-400 transition flex items-center justify-between group"
+                        >
+                            <span>
+                                {formData.hour}:{formData.minute} {formData.ampm}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition"/>
+                        </button>
                     </div>
+
+                    {/* Render the Modal */}
+                    <TimePickerModal 
+                        isOpen={showTimePicker} 
+                        onClose={() => setShowTimePicker(false)}
+                        onSelect={handleTimeSelect}
+                        busyIntervals={busyIntervals}
+                        selectedTime={{ hour: formData.hour, minute: formData.minute, ampm: formData.ampm }}
+                    />
                 </div>
                 
                 {/* Payment Method */}
@@ -131,13 +242,10 @@ export default function RequestForm({
                 ) : (
                     timeStatus.isValid ? (
                         <div id="total-section-target" className="space-y-3">
-                            {/* Price is now calculated automatically */}
                             <div className="bg-gray-100 p-3 rounded-lg text-center border border-gray-200">
                                 <p className="text-xs text-gray-500 uppercase font-bold">Estimated Base Price</p>
                                 <p className="text-2xl font-bold text-gray-800">${total > 0 ? (isLate ? (subtotal-surcharge).toFixed(2) : subtotal.toFixed(2)) : '0.00'}</p>
                             </div>
-                            
-                            {/* POLICY NOTE - Added as requested */}
                             <div className="px-3 py-2 bg-blue-50 rounded border border-blue-100 flex items-start">
                                 <Info className="w-4 h-4 text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
                                 <p className="text-xs text-blue-800">
@@ -145,56 +253,22 @@ export default function RequestForm({
                                     If rejected, you will have <strong>one chance</strong> to negotiate a new price or time.
                                 </p>
                             </div>
-                            
-                            {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100">
-                                <p className="font-bold">Price before discount: ${subtotal.toFixed(2)} (+50% Surcharge)</p>
-                                <label className="flex items-center mt-1">
-                                    <input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept
-                                </label>
-                            </div>}
-                            
+                            {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Price before discount: ${subtotal.toFixed(2)} (+50% Surcharge)</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}
                             {discount > 0 ? (
                                 <div className="mt-3 bg-green-50 p-3 rounded border border-green-100 relative overflow-hidden">
-                                    <div className="relative z-10">
-                                        <p className="text-green-800 font-bold text-sm flex items-center">
-                                            <CheckCircle className="w-4 h-4 mr-1" /> REWARD APPLIED
-                                        </p>
-                                        <p className="text-xs text-green-700 mt-0.5">
-                                            -${discount.toFixed(2)} (Max capped at $160)
-                                        </p>
-                                        <div className="mt-2 pt-2 border-t border-green-200">
-                                            <p className="text-xs text-green-700 uppercase font-bold">Total to Pay</p>
-                                            <p className="text-2xl font-extrabold text-green-800">${total.toFixed(2)}</p>
-                                        </div>
-                                    </div>
-                                    {/* Subtle alert if partial value used */}
-                                    {subtotal < 160 && (
-                                        <p className="mt-2 text-[10px] text-green-800 italic opacity-80">
-                                            Note: Delivery cost is under $160. Remaining reward value is not carried over.
-                                        </p>
-                                    )}
+                                    <div className="relative z-10"><p className="text-green-800 font-bold text-sm flex items-center"><CheckCircle className="w-4 h-4 mr-1" /> REWARD APPLIED</p><p className="text-xs text-green-700 mt-0.5">-${discount.toFixed(2)} (Max capped at $160)</p><div className="mt-2 pt-2 border-t border-green-200"><p className="text-xs text-green-700 uppercase font-bold">Total to Pay</p><p className="text-2xl font-extrabold text-green-800">${total.toFixed(2)}</p></div></div>
+                                    {subtotal < 160 && <p className="mt-2 text-[10px] text-green-800 italic opacity-80">Note: Delivery cost is under $160. Remaining reward value is not carried over.</p>}
                                 </div>
-                            ) : (
-                                <p className="text-sm text-gray-500 font-bold mt-2 text-right">Total: ${total.toFixed(2)}</p>
-                            )}
+                            ) : (<p className="text-sm text-gray-500 font-bold mt-2 text-right">Total: ${total.toFixed(2)}</p>)}
                         </div>
                     ) : (
-                        <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse">
-                            <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
-                            <p className="text-red-800 font-bold text-sm">Cannot Complete Request</p>
-                            <p className="text-red-600 text-xs mt-1">{timeStatus.error}</p>
-                        </div>
+                        <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse"><AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" /><p className="text-red-800 font-bold text-sm">Cannot Complete Request</p><p className="text-red-600 text-xs mt-1">{timeStatus.error}</p></div>
                     )
                 )}
                 
-                {/* Notes */}
-                <div>
-                    <label className="text-xs text-gray-500 font-bold mb-1 block">Notes <span className="font-normal lowercase">(what is being delivered?)</span></label>
-                    <textarea required className="w-full border rounded p-2 text-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
-                </div>
+                <div><label className="text-xs text-gray-500 font-bold mb-1 block">Notes <span className="font-normal lowercase">(what is being delivered?)</span></label><textarea required className="w-full border rounded p-2 text-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} /></div>
                 
-                {/* Submit Button */}
-                <button type="submit" disabled={loading || !timeStatus.isValid || isQuote} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${(!timeStatus.isValid || isQuote) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                <button type="submit" disabled={loading || !timeStatus.isValid || isQuote} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${(loading || !timeStatus.isValid || isQuote) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
                     {loading ? 'Processing...' : (isQuote ? 'Call to Book' : (editingId ? 'Update Request' : 'Submit Request'))}
                 </button>
             </form>
