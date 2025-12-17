@@ -2,13 +2,15 @@ import React from 'react';
 import { XCircle, X } from 'lucide-react'; 
 import { db } from '../../config/firebase'; 
 import { doc, updateDoc } from 'firebase/firestore'; 
+import { sendNotificationEmail, TEMPLATES } from '../../utils/emailService'; 
 
 export default function RejectionModal({
     rejectingJobId, setRejectingJobId,
     rejectionReason, setRejectionReason, rejectionNote, setRejectionNote,
     counterPrice, setCounterPrice, counterDate, setCounterDate,
     counterHour, setCounterHour, counterMinute, setCounterMinute,
-    counterAmpm, setCounterAmpm, isSubmitting, setIsSubmitting // <-- Prop received here
+    counterAmpm, setCounterAmpm, isSubmitting, setIsSubmitting,
+    clientEmail, clientName 
 }) {
     if (!rejectingJobId) return null;
 
@@ -22,20 +24,13 @@ export default function RejectionModal({
                 timestamp: new Date().toISOString()
             };
 
-            // --- VALIDATION AND COUNTER PAYLOAD CREATION ---
             if (rejectionReason === 'price') {
                 if (!counterPrice) return alert("Please enter a new price");
                 rejectionData.counterPrice = parseFloat(counterPrice);
             } else if (rejectionReason === 'time') {
                 if (!counterDate) return alert("Please select a date");
-                rejectionData.counterTime = {
-                    date: counterDate,
-                    hour: counterHour,
-                    minute: counterMinute,
-                    ampm: counterAmpm
-                };
+                rejectionData.counterTime = { date: counterDate, hour: counterHour, minute: counterMinute, ampm: counterAmpm };
             }
-            // ----------------------------------------------
 
             await updateDoc(doc(db, "requests", rejectingJobId), {
                 status: 'rejected',
@@ -44,7 +39,18 @@ export default function RejectionModal({
                 hasClientCountered: false 
             });
 
-            // --- RESET STATE AND CLOSE MODAL ---
+            // FIX: Ensure clientEmail is available before sending
+            if (clientEmail) {
+                sendNotificationEmail(TEMPLATES.CLIENT_STATUS_UPDATE, {
+                    to_name: clientName || clientEmail, // Robust to_name fallback
+                    to_email: clientEmail, 
+                    subject: "Update: Request Rejected/Counter Offered",
+                    message: `Your delivery request was rejected by the Owner due to ${rejectionReason}. Please log in to view the note and potential counter-offer.`,
+                    status: "Rejected / Counter Offer",
+                    link: window.location.origin + "/client"
+                });
+            }
+
             setRejectingJobId(null);
             setRejectionNote('');
             setCounterPrice('');

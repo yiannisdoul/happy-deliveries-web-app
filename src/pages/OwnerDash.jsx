@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
-import { CLOUD_NAME, UPLOAD_PRESET } from '../utils/constants'; // Removed STAMP_MAX, we calculate dynamically now
-import { calculateTier } from '../utils/tierSystem'; // Import Tier Logic
+import { CLOUD_NAME, UPLOAD_PRESET, COMPANY_EMAIL } from '../utils/constants'; 
+import { calculateTier } from '../utils/tierSystem';
+import { sendNotificationEmail, TEMPLATES } from '../utils/emailService'; 
 
 // IMPORT COMPONENTS
 import JobCard from '../components/Owner/JobCard';
@@ -26,7 +27,6 @@ export default function OwnerDash() {
   const sigPad = useRef({}); 
   const [viewProofJob, setViewProofJob] = useState(null);
   
-  // --- REJECTION MODAL STATE ---
   const [rejectingJobId, setRejectingJobId] = useState(null); 
   const [rejectionReason, setRejectionReason] = useState('price');
   const [rejectionNote, setRejectionNote] = useState('');
@@ -35,9 +35,6 @@ export default function OwnerDash() {
   const [counterHour, setCounterHour] = useState('10');
   const [counterMinute, setCounterMinute] = useState('00');
   const [counterAmpm, setCounterAmpm] = useState('AM');
-  // -----------------------------
-
-  // === UTILITY & BUSINESS LOGIC (State Managers) ===
 
   const handleMinimize = () => {
       if (editedJobs.length > 0) { setShowNotification(false); setIsMinimized(true); } 
@@ -52,10 +49,30 @@ export default function OwnerDash() {
           setShowNotification(false); setIsMinimized(true);
       }
   };
+
   const handleStatus = async (id, newStatus) => {
-    try { await updateDoc(doc(db, "requests", id), { status: newStatus, hasUnreadEdit: false }); } 
+    try { 
+        await updateDoc(doc(db, "requests", id), { status: newStatus, hasUnreadEdit: false }); 
+        
+        const job = jobs.find(j => j.id === id);
+        if (job && job.clientEmail) {
+            const client = clientMap[job.clientId] || {};
+            
+            if (newStatus === 'accepted') {
+                sendNotificationEmail(TEMPLATES.CLIENT_STATUS_UPDATE, {
+                    to_name: client.fullName || job.clientEmail, // FIX: Robust to_name
+                    to_email: job.clientEmail,
+                    subject: "Your Delivery is Booked!",
+                    message: `Your request from ${job.from} to ${job.to} on ${job.date} at ${job.hour}:${job.minute} ${job.ampm} has been accepted and scheduled for pickup.`,
+                    status: "Accepted",
+                    link: "https://dashboard.happydeliveries.com.au/client"
+                });
+            }
+        }
+    } 
     catch (e) { console.error(e); }
   };
+
   const handleMarkAsReviewed = async (jobId) => {
     try { await updateDoc(doc(db, "requests", jobId), { hasUnreadEdit: false }); } 
     catch (e) { alert("Error marking job as reviewed."); console.error(e); }
@@ -66,7 +83,6 @@ export default function OwnerDash() {
       setCounterAmpm(job.ampm);
   };
   
-  // Logic required by DeliveryModal
   const uploadToCloudinary = async (file) => {
     const formData = new FormData(); formData.append('file', file);
     formData.append('upload_preset', UPLOAD_PRESET);
@@ -75,43 +91,26 @@ export default function OwnerDash() {
     const data = await res.json(); return data.secure_url;
   };
 
-  // --- UPDATED LOYALTY LOGIC ---
   const handleLoyaltyStamping = async (clientId, job) => {
       const userRef = doc(db, "users", clientId);
       const userDoc = await getDoc(userRef); 
       const userData = userDoc.data() || {};
-
-      // 1. UPDATE EXPERIENCE (Monthly Count)
-      // Always increment this, even if a reward was used for this job.
       const currentMonthlyCount = (userData.monthly_delivery_count || 0) + 1;
-      
-      const updates = {
-          monthly_delivery_count: currentMonthlyCount
-      };
+      const updates = { monthly_delivery_count: currentMonthlyCount };
 
-      // 2. UPDATE STAMPS (Only if reward NOT used)
       if (!job.rewardUsed) {
           let currentStamps = userData.stamps || 0;
           let currentRewards = userData.rewardCount || 0;
-          
-          // Determine Max Stamps based on the USER'S TIER
-          // We use the NEW monthly count so they get immediate benefit if they just leveled up
           const { current: tier } = calculateTier(currentMonthlyCount);
           const maxStampsForUser = tier.slotsNeeded || 10;
-
           currentStamps += 1;
-
-          // Check against dynamic limit (e.g., 9 for Wood, 5 for Diamond)
           if (currentStamps >= maxStampsForUser) {
               currentRewards += 1;
-              currentStamps = 0; // Reset card
+              currentStamps = 0; 
           }
-
           updates.stamps = currentStamps;
           updates.rewardCount = currentRewards;
       }
-
-      // Commit updates
       await updateDoc(userRef, updates);
   };
 
@@ -127,11 +126,23 @@ export default function OwnerDash() {
       
       await updateDoc(doc(db, "requests", deliveringJobId), { status: 'delivered', deliveredAt: new Date().toISOString(), hasUnreadEdit: false, pod: { receiver: receiverName, photo: photoURL, signature: sigURL } });
       
-      // Call updated loyalty logic
-      try { await handleLoyaltyStamping(job.clientId, job); } catch (stampError) { console.error("Loyalty Stamp Failed (Check Firestore Rules):", stampError.message); }
+      try { await handleLoyaltyStamping(job.clientId, job); } catch (stampError) { console.error("Loyalty Stamp Failed:", stampError.message); }
       
+      // Send Delivery Confirmation Email
+      if (job.clientEmail) {
+          const client = clientMap[job.clientId] || {};
+          sendNotificationEmail(TEMPLATES.CLIENT_STATUS_UPDATE, {
+              to_name: client.fullName || job.clientEmail, // FIX: Robust to_name
+              to_email: job.clientEmail,
+              subject: "Delivery Completed",
+              message: `Great news! Your delivery to ${job.to} has been completed. Receiver: ${receiverName}.`,
+              status: "Delivered",
+              link: "https://dashboard.happydeliveries.com.au/client"
+          });
+      }
+
       setDeliveringJobId(null); setReceiverName(''); setPhotoFile(null);
-      alert("✅ Job Delivered Successfully & Proof Saved! Well done.");
+      alert("✅ Job Delivered Successfully & Proof Saved!");
     } catch (error) { console.error("Delivery Error (Fatal):", error); alert(`❌ Delivery Failed: ${error.message}.`); } finally { setIsSubmitting(false); }
   };
 
@@ -196,6 +207,9 @@ export default function OwnerDash() {
           counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={setCounterHour}
           counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
           isSubmitting={isSubmitting} setIsSubmitting={setIsSubmitting}
+          // FIX: Added robust fallback to clientEmail for clientName
+          clientEmail={jobs.find(j => j.id === rejectingJobId)?.clientEmail}
+          clientName={clientMap[jobs.find(j => j.id === rejectingJobId)?.clientId]?.fullName || jobs.find(j => j.id === rejectingJobId)?.clientEmail}
       />
       <DeliveryModal
           deliveringJobId={deliveringJobId} setDeliveringJobId={setDeliveringJobId} receiverName={receiverName}

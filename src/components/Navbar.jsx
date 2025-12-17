@@ -4,242 +4,135 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-
-// Import Tutorial Overlay
 import TutorialOverlay from './Client/TutorialOverlay';
 
-export default function Navbar() {
+// "mode" prop will be either 'landing' or 'dashboard'
+export default function Navbar({ mode = 'dashboard' }) {
   const navigate = useNavigate();
   const location = useLocation(); 
+  
   const [user, setUser] = useState(null);
   const [userName, setUserName] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // --- TUTORIAL STATE ---
   const [isTutorialActive, setIsTutorialActive] = useState(false);
   const [currentStep, setCurrentStep] = useState(1); 
-  // --------------------------
 
-  // Listen for auth changes AND fetch the user's name
+  // CONSTANTS
+  const DASHBOARD_URL = "https://dashboard.happydeliveries.com.au";
+  const LANDING_URL = "https://happydeliveries.com.au";
+
+  // --- LOGIC: Only run Auth checks if we are in DASHBOARD mode ---
   useEffect(() => {
+    if (mode === 'landing') return; // Don't check auth on landing page
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      
       if (currentUser) {
-        // 1. Fetch Name
         const docRef = doc(db, "users", currentUser.uid);
         const docSnap = await getDoc(docRef);
-        if (docSnap.exists() && docSnap.data().fullName) {
-           setUserName(docSnap.data().fullName);
-        } else {
-           setUserName(currentUser.email);
-        }
+        setUserName(docSnap.exists() && docSnap.data().fullName ? docSnap.data().fullName : currentUser.email);
 
-        // 2. TUTORIAL AUTO-START LOGIC (Refined)
-        const isClient = currentUser.email !== 'owner@delivery.com';
-        const hasSeenTutorial = localStorage.getItem('tutorial_completed') === 'true';
-        
-        // Only activate if:
-        // 1. User is a Client
-        // 2. User hasn't completed tutorial
-        // 3. User is currently ON the client dashboard (prevents pop-up on settings/landing)
-        if (isClient && !hasSeenTutorial && location.pathname === '/client') {
+        // Tutorial Logic
+        const isOwner = currentUser.email === 'admin@happydeliveries.com.au';
+        const hasSeen = localStorage.getItem('tutorial_completed') === 'true';
+        if (!isOwner && !hasSeen && location.pathname === '/') {
             setIsTutorialActive(true);
             setCurrentStep(1);
         }
-
-      } else {
-        setUserName('');
-        setIsTutorialActive(false); // Hide if logged out
       }
     });
     return () => unsubscribe();
-  }, [location.pathname]); // Add location.pathname dependency to re-check on navigation
+  }, [mode, location.pathname]);
 
+  // --- HANDLERS ---
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setIsMobileMenuOpen(false);
+    await signOut(auth);
+    window.location.href = LANDING_URL; // Send back to main site on logout
+  };
+
+  // Helper to go to dashboard (External Link if on landing, Internal if on dashboard)
+  const goToDashboard = () => {
+    if (mode === 'landing') {
+      window.location.href = DASHBOARD_URL;
+    } else {
       navigate('/');
-    } catch (error) {
-      console.error("Logout failed", error);
     }
   };
-  
-  const handleRestartTutorial = () => {
-      localStorage.removeItem('tutorial_completed'); 
-      setCurrentStep(1);
-      setIsTutorialActive(true);
-      setIsMobileMenuOpen(false);
-      
-      // Redirect to dashboard so they can see the tutorial
-      if (location.pathname !== '/client') {
-          navigate('/client');
-      }
-  };
 
-  const handleNavigation = (path) => {
-      navigate(path);
-      setIsMobileMenuOpen(false);
-  };
-
-  // Determine paths and visibility
-  const dashboardPath = user?.email === 'owner@delivery.com' ? '/owner' : '/client';
-  const isOnDashboard = location.pathname === dashboardPath;
-  
-  // Only show tutorial button if logged in as client (not owner)
-  const isClientUser = user && user.email !== 'owner@delivery.com';
+  // Helper for Login/Signup buttons
+  const goToLogin = () => window.location.href = `${DASHBOARD_URL}/login`;
+  const goToSignup = () => window.location.href = `${DASHBOARD_URL}/signup`;
 
   return (
     <div className="sticky top-0 z-50">
-      
-      {/* RENDER TUTORIAL OVERLAY - Only on Client Dashboard */}
-      {location.pathname === '/client' && (
-          <TutorialOverlay
-            currentStep={currentStep}
-            setCurrentStep={setCurrentStep}
-            isTutorialActive={isTutorialActive}
-            setIsTutorialActive={setIsTutorialActive}
-          />
+      {/* Tutorial Overlay (Dashboard Only) */}
+      {mode === 'dashboard' && location.pathname === '/' && isTutorialActive && (
+          <TutorialOverlay currentStep={currentStep} setCurrentStep={setCurrentStep} isTutorialActive={isTutorialActive} setIsTutorialActive={setIsTutorialActive} />
       )}
       
-      {/* TOP ANNOUNCEMENT BAR */}
+      {/* Top Bar */}
       <div className="bg-amber-100 text-amber-900 text-xs sm:text-sm py-2 text-center font-medium border-b border-amber-200">
         <div className="flex items-center justify-center gap-2">
-          <Phone className="h-3 w-3 sm:h-4 sm:w-4" />
-          <span>
-            Questions? Call us on{' '}
-            <a href="tel:+61420882302" className="font-bold underline decoration-amber-500 hover:text-amber-700">
-              +61 420 882 302
-            </a>
-          </span>
+          <Phone className="h-3 w-3" />
+          <span>Questions? Call us on <b>+61 420 882 302</b></span>
         </div>
       </div>
 
-      {/* MAIN NAVBAR */}
       <nav className="bg-white shadow-sm relative">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             
             {/* BRANDING */}
-            <div className="flex items-center cursor-pointer flex-shrink-0" onClick={() => handleNavigation('/')}>
+            <div className="flex items-center cursor-pointer" onClick={() => window.location.href = LANDING_URL}>
               <Smile className="h-8 w-8 text-yellow-500 mr-2" />
-              <span className="font-bold text-xl tracking-tight text-blue-900 mr-2">Happy</span>
+              <span className="font-bold text-xl text-blue-900 mr-2">Happy</span>
               <Truck className="h-8 w-8 text-blue-600 mr-1" />
-              <span className="font-bold text-xl tracking-tight text-blue-900">Deliveries</span>
+              <span className="font-bold text-xl text-blue-900">Deliveries</span>
             </div>
 
             {/* DESKTOP MENU */}
-            <div className="hidden md:flex items-center space-x-4 flex-shrink-0">
-              {user ? (
+            <div className="hidden md:flex items-center space-x-4">
+              {mode === 'dashboard' && user ? (
+                /* LOGGED IN DASHBOARD VIEW */
                 <div className="flex items-center gap-3">
-                  {/* Name */}
-                  <span className="text-sm font-semibold text-gray-700 capitalize max-w-[150px] truncate">
-                    {userName}
-                  </span>
-                  
-                  {/* Tutorial Button (Client Only) */}
-                  {isClientUser && (
-                    <button 
-                      onClick={handleRestartTutorial}
-                      className="text-xs bg-blue-500 text-white hover:bg-blue-600 px-3 py-1.5 rounded-lg font-semibold transition-colors shadow-sm"
-                    >
-                      Tutorial 
-                    </button>
-                  )}
-                  
-                  {/* Dashboard Button */}
-                  {!isOnDashboard && (
-                    <button 
-                      onClick={() => navigate(dashboardPath)}
-                      className="p-2 text-blue-600 hover:text-blue-800 transition rounded-full hover:bg-blue-50"
-                      title="Go to Dashboard"
-                    >
-                      <LayoutDashboard className="h-5 w-5" />
-                    </button>
-                  )}
-                  
-                  {/* Settings */}
-                  <button 
-                    onClick={() => navigate('/settings')}
-                    className="p-2 text-gray-600 hover:text-blue-600 transition rounded-full hover:bg-gray-100"
-                    title="Settings"
-                  >
-                    <Settings className="h-5 w-5" />
-                  </button>
-
-                  <button 
-                    onClick={handleLogout}
-                    className="flex items-center text-sm font-medium text-gray-700 hover:text-red-600 transition ml-1"
-                  >
-                    <LogOut className="h-4 w-4 mr-1" />
-                    <span>Sign Out</span>
-                  </button>
+                  <span className="text-sm font-semibold text-gray-700 capitalize max-w-[150px] truncate">{userName}</span>
+                  <button onClick={goToDashboard} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full" title="Dashboard"><LayoutDashboard className="h-5 w-5" /></button>
+                  <button onClick={() => navigate('/settings')} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full" title="Settings"><Settings className="h-5 w-5" /></button>
+                  <button onClick={handleLogout} className="flex items-center text-sm font-medium text-gray-700 hover:text-red-600 ml-1"><LogOut className="h-4 w-4 mr-1" /> Sign Out</button>
                 </div>
               ) : (
-                <div className="space-x-2 flex items-center">
-                  <button onClick={() => navigate('/login')} className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-blue-600">
-                    Log In
-                  </button>
-                  <button onClick={() => navigate('/signup')} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition shadow-sm">
-                    Sign Up
-                  </button>
+                /* PUBLIC / LANDING VIEW */
+                <div className="space-x-2">
+                  <button onClick={goToLogin} className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-blue-600">Log In</button>
+                  <button onClick={goToSignup} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Sign Up</button>
                 </div>
               )}
             </div>
 
-            {/* MOBILE HAMBURGER */}
+            {/* MOBILE MENU TOGGLE */}
             <div className="md:hidden flex items-center">
-                <button 
-                    onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                    className="text-gray-600 hover:text-blue-600 focus:outline-none p-2"
-                >
+                <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-gray-600">
                     {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
                 </button>
             </div>
           </div>
         </div>
-
-        {/* MOBILE MENU DROPDOWN */}
+        
+        {/* MOBILE DROPDOWN (Simplified for brevity, follows same logic) */}
         {isMobileMenuOpen && (
-            <div className="md:hidden bg-white border-t border-gray-100 shadow-lg absolute w-full left-0 z-40 px-4 py-4 flex flex-col space-y-4">
-                {user ? (
+            <div className="md:hidden bg-white border-t border-gray-100 shadow-lg absolute w-full px-4 py-4 flex flex-col space-y-3 z-40">
+                {mode === 'dashboard' && user ? (
                     <>
-                        <div className="flex flex-col border-b border-gray-100 pb-4">
-                            <span className="text-xs text-gray-500 uppercase tracking-wider font-bold">Signed in as</span>
-                            <span className="text-lg font-bold text-gray-800 capitalize">{userName}</span>
-                        </div>
-
-                        <div className="flex flex-col space-y-3">
-                            {!isOnDashboard && (
-                                <button onClick={() => handleNavigation(dashboardPath)} className="flex items-center text-gray-700 hover:text-blue-600 py-2">
-                                    <LayoutDashboard className="h-5 w-5 mr-3" /> Dashboard
-                                </button>
-                            )}
-
-                            {isClientUser && (
-                                <button onClick={handleRestartTutorial} className="flex items-center justify-between w-full bg-blue-50 text-blue-700 px-4 py-3 rounded-lg font-semibold">
-                                    <span>Tutorial</span>
-                                    <Smile className="h-5 w-5" />
-                                </button>
-                            )}
-
-                            <button onClick={() => handleNavigation('/settings')} className="flex items-center text-gray-700 hover:text-blue-600 py-2">
-                                <Settings className="h-5 w-5 mr-3" /> Settings
-                            </button>
-                        </div>
-
-                        <div className="border-t border-gray-100 pt-3">
-                            <button onClick={handleLogout} className="flex items-center text-red-600 hover:text-red-700 font-medium w-full py-2">
-                                <LogOut className="h-5 w-5 mr-3" /> Sign Out
-                            </button>
-                        </div>
+                        <div className="font-bold text-gray-800">{userName}</div>
+                        <button onClick={goToDashboard} className="flex items-center py-2 text-gray-700"><LayoutDashboard className="h-5 w-5 mr-3"/> Dashboard</button>
+                        <button onClick={() => navigate('/settings')} className="flex items-center py-2 text-gray-700"><Settings className="h-5 w-5 mr-3"/> Settings</button>
+                        <button onClick={handleLogout} className="flex items-center py-2 text-red-600"><LogOut className="h-5 w-5 mr-3"/> Sign Out</button>
                     </>
                 ) : (
-                    <div className="flex flex-col space-y-3">
-                        <button onClick={() => handleNavigation('/login')} className="w-full text-center py-3 border border-gray-300 rounded-lg text-gray-700 font-medium">Log In</button>
-                        <button onClick={() => handleNavigation('/signup')} className="w-full text-center py-3 bg-blue-600 text-white rounded-lg font-medium">Sign Up</button>
-                    </div>
+                    <>
+                        <button onClick={goToLogin} className="w-full py-3 border rounded-lg">Log In</button>
+                        <button onClick={goToSignup} className="w-full py-3 bg-blue-600 text-white rounded-lg">Sign Up</button>
+                    </>
                 )}
             </div>
         )}

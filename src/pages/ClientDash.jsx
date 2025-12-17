@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { REWARD_VALUE } from '../utils/constants';
+import { REWARD_VALUE, COMPANY_EMAIL } from '../utils/constants';
 import { useNavigate } from 'react-router-dom';
 
 // UTILS
 import { checkAndPerformReset } from '../utils/resetLogic';
 import { calculatePrice, DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../utils/pricingCalculator';
-import { calculateJobDuration, getMinutesFromMidnight } from '../utils/timeBlocking';
+import { calculateJobDuration, getMinutesFromMidnight } from '../utils/timeBlocking'; 
+import { sendNotificationEmail, TEMPLATES } from '../utils/emailService';
 
 // COMPONENTS
 import LoyaltyCard from '../components/Client/LoyaltyCard';
@@ -57,8 +58,7 @@ export default function ClientDash() {
         notes: '', paymentMethod: 'cash',
         date: getTomorrowDate(),
         hour: '10', minute: '00', ampm: 'AM',
-        acceptSurcharge: false,
-        purchaseOrder: '', poType: 'entry',
+        acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
         distIndex: 2, 
         weightIndex: 0
     });
@@ -223,142 +223,145 @@ export default function ClientDash() {
     
     // --- COUNTER MODAL HANDLERS ---
     const openCounterModal = (job) => { 
-        setCounteringJob(job); 
-        setCounterNote(job.rejectionDetails?.note || ''); 
-        setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); 
+        setCounteringJob(job); setCounterNote(job.rejectionDetails?.note || ''); setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); 
         if (job.rejectionDetails?.counterTime) {
-            setCounterDate(job.rejectionDetails.counterTime.date);
-            setCounterHour(job.rejectionDetails.counterTime.hour);
-            setCounterMinute(job.rejectionDetails.counterTime.minute);
-            setCounterAmpm(job.rejectionDetails.counterTime.ampm);
+            setCounterDate(job.rejectionDetails.counterTime.date); setCounterHour(job.rejectionDetails.counterTime.hour); setCounterMinute(job.rejectionDetails.counterTime.minute); setCounterAmpm(job.rejectionDetails.counterTime.ampm);
         }
     };
 
     const handleSubmitCounterModal = async (e) => { 
         e.preventDefault(); 
         if(!confirm("Are you sure you want to send this counter-offer?")) return; 
-        
         try { 
             const updates = { 
-                status: 'pending', 
-                hasUnreadEdit: true, 
-                hasClientCountered: true, 
-                rejectionDetails: null, 
-                updatedAt: serverTimestamp(),
-                notes: counterNote
+                status: 'pending', hasUnreadEdit: true, hasClientCountered: true, 
+                rejectionDetails: null, updatedAt: serverTimestamp(), notes: counterNote
             };
-
             if (counteringJob.rejectionDetails?.reason === 'price') {
-                updates.amount = parseFloat(counterPrice);
-                updates.totalAmount = parseFloat(counterPrice);
+                updates.amount = parseFloat(counterPrice); updates.totalAmount = parseFloat(counterPrice);
             } else if (counteringJob.rejectionDetails?.reason === 'time') {
-                updates.date = counterDate;
-                updates.hour = counterHour;
-                updates.minute = counterMinute;
-                updates.ampm = counterAmpm;
+                updates.date = counterDate; updates.hour = counterHour; updates.minute = counterMinute; updates.ampm = counterAmpm;
             }
-
             await updateDoc(doc(db, "requests", counteringJob.id), updates); 
-            alert("Counter Offer Sent!"); 
-            setCounteringJob(null); 
-        } catch(e) { 
-            alert("Error sending counter: " + e.message); 
-        } 
+            
+            // EMAIL ALERT: Counter Offer Received (Owner)
+            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
+                to_name: "Owner",
+                to_email: COMPANY_EMAIL,
+                subject: "Counter Offer Received",
+                message: `Client ${auth.currentUser.email} has sent a counter-offer.`,
+                status: "Pending Review",
+                total_price: `$${total.toFixed(2)}`,
+                client_email: auth.currentUser.email,
+                job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`,
+                link: "https://dashboard.happydeliveries.com.au/owner"
+            });
+
+            alert("Counter Offer Sent!"); setCounteringJob(null); 
+        } catch(e) { alert("Error sending counter: " + e.message); } 
     };
 
     const handleAcceptCounter = async (job) => { 
-        if (!confirm("Are you sure you want to accept the new terms?")) return;
-        const updates = { 
-            status: 'accepted', 
-            hasUnreadEdit: true, 
-            hasClientCountered: true, 
-            rejectionDetails: null 
-        };
-        
-        if (job.rejectionDetails?.counterPrice) { 
-            updates.amount = parseFloat(job.rejectionDetails.counterPrice); 
-            updates.totalAmount = parseFloat(job.rejectionDetails.counterPrice); 
-        }
-        if (job.rejectionDetails?.counterTime) { 
-            const t = job.rejectionDetails.counterTime; 
-            updates.date = t.date; 
-            updates.hour = t.hour; 
-            updates.minute = t.minute; 
-            updates.ampm = t.ampm; 
-        }
-        
+        if (!confirm("Are you sure you want to accept?")) return;
+        const updates = { status: 'accepted', hasUnreadEdit: true, hasClientCountered: true, rejectionDetails: null };
+        if (job.rejectionDetails?.counterPrice) { updates.amount = parseFloat(job.rejectionDetails.counterPrice); updates.totalAmount = parseFloat(job.rejectionDetails.counterPrice); }
+        if (job.rejectionDetails?.counterTime) { const t = job.rejectionDetails.counterTime; updates.date = t.date; updates.hour = t.hour; updates.minute = t.minute; updates.ampm = t.ampm; }
         try { 
             await updateDoc(doc(db, "requests", job.id), updates); 
-            alert("Offer Accepted! Job is now active."); 
-        } catch { 
-            alert("Error accepting offer."); 
-        }
+            
+            // EMAIL ALERT: Offer Accepted (Owner)
+            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
+                to_name: "Owner",
+                to_email: COMPANY_EMAIL,
+                subject: "Offer Accepted by Client",
+                message: `Client ${auth.currentUser.email} accepted your counter-offer.`,
+                status: "Accepted",
+                total_price: `$${total.toFixed(2)}`,
+                client_email: auth.currentUser.email,
+                job_time: `${job.date} @ ${job.hour}:${job.minute} ${job.ampm}`,
+                link: "https://dashboard.happydeliveries.com.au/owner"
+            });
+
+            alert("Offer Accepted!"); 
+        } catch { alert("Error."); }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (isQuote) return alert("Please call us for a special quote on this delivery.");
+        if (isQuote) return alert("Please call us for a special quote.");
         if (formData.pickupPhone.length < 9 || formData.dropoffPhone.length < 9) return alert("Phone numbers must be 9 digits.");
         if (!timeStatus.isValid) return alert(`Cannot submit: ${timeStatus.error}`);
-        if (isLate && !formData.acceptSurcharge) return alert("You must accept the surcharge for late same-day delivery.");
+        if (isLate && !formData.acceptSurcharge) return alert("You must accept the surcharge.");
         if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Enter PO or select N/A.");
 
         setLoading(true);
         try {
             const finalPO = formData.poType === 'na' ? "N/A" : formData.purchaseOrder;
-            
             const distLabel = DISTANCE_OPTIONS[formData.distIndex].label;
             const weightLabel = WEIGHT_OPTIONS[formData.weightIndex].label;
 
             const payload = {
-                ...formData, 
-                purchaseOrder: finalPO, 
-                
-                amount: subtotal + discount - surcharge, 
-                surcharge: surcharge, 
-                totalAmount: total, 
-                
-                distanceLabel: distLabel,
-                weightLabel: weightLabel,
-
-                clientEmail: auth.currentUser.email,
-                clientId: auth.currentUser.uid, 
-                status: 'pending', 
-                updatedAt: serverTimestamp(),
+                ...formData, purchaseOrder: finalPO, 
+                amount: subtotal + discount - surcharge, surcharge: surcharge, totalAmount: total, 
+                distanceLabel: distLabel, weightLabel: weightLabel,
+                clientEmail: auth.currentUser.email, clientId: auth.currentUser.uid, 
+                status: 'pending', updatedAt: serverTimestamp(),
                 rewardUsed: useRewardOnThisJob && discount > 0,
             };
             
-            delete payload.poType; 
-            delete payload.distIndex; 
-            delete payload.weightIndex;
+            delete payload.poType; delete payload.distIndex; delete payload.weightIndex;
 
             if (!editingId) {
                 payload.createdAt = serverTimestamp();
-                await addDoc(collection(db, "requests"), payload);
-                alert(`Request Sent! Total: $${total.toFixed(2)}.`);
+                const docRef = await addDoc(collection(db, "requests"), payload);
                 
+                // EMAIL ALERT: New Delivery Request (Owner)
+                sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
+                    to_name: "Owner",
+                    to_email: COMPANY_EMAIL,
+                    subject: "New Delivery Request",
+                    message: `New Job from ${formData.pickupName} to ${formData.dropoffName} (${distLabel}, ${weightLabel}) submitted by ${auth.currentUser.email}.`,
+                    status: "Pending",
+                    total_price: `$${total.toFixed(2)}`,
+                    client_email: auth.currentUser.email,
+                    job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`,
+                    link: "https://dashboard.happydeliveries.com.au/owner"
+                });
+
+                alert(`Request Sent! Total: $${total.toFixed(2)}.`);
                 if (payload.rewardUsed) {
                     await updateDoc(doc(db, "users", auth.currentUser.uid), { rewardCount: rewardCount - 1 });
                     setUseRewardOnThisJob(false); 
                 }
             } else {
-                payload.hasUnreadEdit = true;
-                await updateDoc(doc(db, "requests", editingId), payload);
-                alert("Request Updated!"); 
-                setEditingId(null);
+                await updateDoc(doc(db, "requests", editingId), { ...payload, hasUnreadEdit: true });
+                
+                // EMAIL ALERT: Request Updated (Owner)
+                sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
+                    to_name: "Owner",
+                    to_email: COMPANY_EMAIL,
+                    subject: "Request Updated by Client",
+                    message: `Client ${auth.currentUser.email} updated a request.`,
+                    status: "Pending",
+                    total_price: `$${total.toFixed(2)}`,
+                    client_email: auth.currentUser.email,
+                    job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`,
+                    link: "https://dashboard.happydeliveries.com.au/owner"
+                });
+
+                alert("Request Updated!"); setEditingId(null);
             }
             
             setFormData({ 
                 pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
                 notes: '', paymentMethod: 'cash', 
-                date: getTomorrowDate(),
-                hour: '10', minute: '00', ampm: 'AM', 
+                date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', 
                 acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
                 distIndex: 2, weightIndex: 0
             });
         } catch (e) {
             console.error(e);
-            alert("Error submitting request: " + e.message);
+            alert("Error submitting: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -370,12 +373,11 @@ export default function ClientDash() {
             <CounterOfferModal
                 counteringJob={counteringJob} setCounteringJob={setCounteringJob} handleSubmitCounterModal={handleSubmitCounterModal}
                 counterNote={counterNote} setCounterNote={setCounterNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice}
-                counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={setCounterHour}
+                counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={counterHour}
                 counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
             />
 
             <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
-                {/* LEFT/TOP COLUMN */}
                 <div className="md:col-span-1 order-1">
                     <div className="space-y-4">
                         <div id="gamification-bar-target" className="relative">
@@ -388,10 +390,7 @@ export default function ClientDash() {
 
                         <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
                             <div id="loyalty-card-target" className="relative">
-                                <LoyaltyCard 
-                                    stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob}
-                                    setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} 
-                                />
+                                <LoyaltyCard stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob} setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} />
                                 <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/loyalty-program')}>
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
                                     <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">Details on stamp earning, rewards, and how tiers affect your goal.</div>
@@ -403,27 +402,19 @@ export default function ClientDash() {
                                     formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput}
                                     timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount}
                                     editingId={editingId} loading={loading}
-                                    isQuote={isQuote}
-                                    busyIntervals={busyIntervals}
+                                    isQuote={isQuote} busyIntervals={busyIntervals}
                                 />
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* RIGHT/BOTTOM COLUMN: Jobs List */}
                 <div className="md:col-span-2 order-2 space-y-4" id="jobs-list-target">
                     <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
                         <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
                         <div className="flex flex-wrap justify-center sm:justify-end bg-gray-100 p-1 rounded-lg space-x-1" id="jobs-filter-target">
                             {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
-                                <button 
-                                    key={status} 
-                                    onClick={() => setFilter(status)} 
-                                    className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                >
-                                    {status}
-                                </button>
+                                <button key={status} onClick={() => setFilter(status)} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
                             ))}
                         </div>
                     </div>
@@ -432,11 +423,7 @@ export default function ClientDash() {
 
                     <div className="space-y-4">
                         {filteredJobs.map((job) => (
-                            <ClientJobCard
-                                key={job.id} job={job} openCounterModal={openCounterModal} 
-                                handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob}
-                                handleEdit={handleEdit} 
-                            />
+                            <ClientJobCard key={job.id} job={job} openCounterModal={openCounterModal} handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob} handleEdit={handleEdit} />
                         ))}
                     </div>
                 </div>
