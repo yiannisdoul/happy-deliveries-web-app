@@ -1,9 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Calendar, DollarSign, Shield, TrendingUp, Maximize } from 'lucide-react'; // Added TrendingUp, Maximize
+import { CheckCircle, Calendar, DollarSign, Shield, TrendingUp, Maximize } from 'lucide-react'; 
 
 export default function Landing() {
   const navigate = useNavigate();
+
+  // Define the external dashboard URL
+  const DASHBOARD_URL = "https://dashboard.happydeliveries.com.au";
 
   return (
     <div className="flex flex-col bg-gray-50 min-h-screen">
@@ -22,18 +25,27 @@ export default function Landing() {
               Unlock faster free deliveries with our status tiers and bank your rewards forever.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
-              <button onClick={() => navigate('/signup')}
-                className="w-full sm:w-auto px-8 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-lg font-bold text-lg">
+              
+              {/* FIX 1: External Link to Dashboard App */}
+              <button 
+                onClick={() => window.location.href = `${DASHBOARD_URL}/signup`}
+                className="w-full sm:w-auto px-8 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-lg font-bold text-lg"
+              >
                 Book a Delivery
               </button>
-              <button onClick={() => navigate('/tier-program')} // Link to Tier Page
-                className="w-full sm:w-auto px-8 py-3 text-blue-600 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 font-bold text-lg">
+
+              {/* FIX 2: Internal Link to Loyalty Page (within Marketing Site) */}
+              <button 
+                onClick={() => navigate('/loyalty-program')} 
+                className="w-full sm:w-auto px-8 py-3 text-blue-600 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 font-bold text-lg"
+              >
                 View Loyalty Perks
               </button>
+
             </div>
           </div>
           
-          {/* Illustration Card (Existing) */}
+          {/* Illustration Card */}
           <div className="mt-10 lg:mt-0 lg:w-1/2 lg:pl-12 flex justify-center">
              <div className="bg-blue-50 rounded-2xl p-6 transform rotate-2 shadow-xl border border-blue-100 max-w-sm w-full">
                 <div className="space-y-4">
@@ -57,7 +69,7 @@ export default function Landing() {
         </div>
       </div>
 
-      {/* Feature Grid (Updated with Tier/Loyalty) */}
+      {/* Feature Grid */}
       <div className="py-12 bg-gray-50">
         <div className="max-w-6xl mx-auto px-4">
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

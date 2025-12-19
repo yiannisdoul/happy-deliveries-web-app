@@ -77,6 +77,11 @@ function MarketingSite() {
       <Navbar mode="landing" /> {/* Pass "landing" mode to Navbar */}
       <Routes>
         <Route path="/" element={<Landing />} />
+        
+        {/* ADDED: Public Access to Program Details */}
+        <Route path="/loyalty-program" element={<LoyaltyProgram />} />
+        <Route path="/tier-program" element={<TierProgram />} />
+
         {/* Any other public pages go here */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
