@@ -1,54 +1,36 @@
 // --- CONFIGURATION ---
-
-const TRANSITION_BUFFER = 30; // Minutes between jobs
+const SPEED_KMH = 40; 
+const MANDATORY_BUFFER = 30; // Minutes between jobs for travel/rest
 
 /**
  * Calculates the total duration (in minutes) a job occupies.
- * @param {number} distance - Actual distance in km
- * @param {number} weight - Actual weight in tonnes
- * @param {string} dateStr - "YYYY-MM-DD"
- * @param {string|number} hourStr - Hour (1-12)
- * @param {string} ampm - "AM" or "PM"
  */
-export const calculateJobDuration = (distance, weight, dateStr, hourStr, ampm) => {
-    // 1. Convert Time to 24h for Traffic Logic
-    let hour24 = parseInt(hourStr);
-    if (ampm === 'PM' && hour24 !== 12) hour24 += 12;
-    if (ampm === 'AM' && hour24 === 12) hour24 = 0;
+export const calculateJobDuration = (weightBracket, distance, flights = 0, difficultAccess = false) => {
+    // 1. Labor Time & Trips
+    let laborMins = 0;
+    let trips = 1;
 
-    // 2. Determine Day Type
-    const dateObj = new Date(dateStr);
-    const day = dateObj.getDay(); // 0 = Sun, 6 = Sat
-    const isWeekend = (day === 0 || day === 6);
-
-    // 3. Traffic Multiplier
-    let trafficMult = 1.1; // Default Mid-Day Weekday
-    
-    if (isWeekend) {
-        trafficMult = 1.0;
-    } else {
-        // Weekday Logic
-        if (hour24 >= 7 && hour24 < 9) trafficMult = 1.5; // Morning Peak
-        else if (hour24 >= 15 && hour24 < 18) trafficMult = 1.5; // Afternoon Peak
+    if (weightBracket === 1) { 
+        laborMins = 60; trips = 1; 
+    } else if (weightBracket === 2) { 
+        laborMins = 120; trips = 2; 
+    } else if (weightBracket === 3) { 
+        laborMins = 180; trips = 3; 
+    } else { 
+        return 0; // Special Quote (No time block)
     }
 
-    // 4. Calculate Component Times based on actual numbers
-    let baseTime = 45; // Default 0-25km
-    if (distance > 200) baseTime = 240;
-    else if (distance > 150) baseTime = 150;
-    else if (distance > 100) baseTime = 120;
-    else if (distance > 75) baseTime = 105;
-    else if (distance > 50) baseTime = 90;
-    else if (distance > 25) baseTime = 75;
+    // 2. Transit Time (Distance / 40km/h * 2 legs per trip)
+    const hoursPerLeg = distance / SPEED_KMH;
+    const totalLegs = trips * 2;
+    const transitMins = Math.round(hoursPerLeg * 60 * totalLegs);
 
-    let laborTime = 30; // Default <1t
-    if (weight > 3) laborTime = 90;
-    else if (weight > 2) laborTime = 60;
-    else if (weight > 1) laborTime = 45;
-    
-    const travelTimeWithTraffic = Math.round(baseTime * trafficMult);
-    
-    return travelTimeWithTraffic + laborTime + TRANSITION_BUFFER;
+    // 3. Complexity Buffers
+    const stairsMins = 15 * flights * trips;
+    const accessMins = difficultAccess ? 30 : 0;
+
+    // 4. Total Job Duration + Mandatory Buffer
+    return laborMins + transitMins + stairsMins + accessMins + MANDATORY_BUFFER;
 };
 
 /**
@@ -62,12 +44,18 @@ export const getMinutesFromMidnight = (hour, minute, ampm) => {
 };
 
 /**
- * Checks if a specific time slot is inside any busy interval.
- * @param {number} checkMinutes - Time to check (mins from midnight)
- * @param {Array} busyIntervals - [{start: 600, end: 750}, ...]
+ * Checks if a specific time slot OR its duration overlaps with any busy interval.
  */
-export const isSlotBlocked = (checkMinutes, busyIntervals) => {
-    return busyIntervals.some(interval => 
-        checkMinutes >= interval.start && checkMinutes < interval.end
-    );
+export const isSlotBlocked = (checkMinutes, proposedDuration, busyIntervals) => {
+    // If the job is a quote, we don't know the duration, so block nothing by default 
+    if (proposedDuration === 0) return false; 
+
+    const proposedEnd = checkMinutes + proposedDuration;
+
+    return busyIntervals.some(interval => {
+        // OVERLAP LOGIC: A new job overlaps an existing job IF:
+        // Its start time is BEFORE the existing job ends AND
+        // Its end time is AFTER the existing job starts.
+        return checkMinutes < interval.end && proposedEnd > interval.start;
+    });
 };

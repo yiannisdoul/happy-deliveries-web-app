@@ -3,8 +3,7 @@ import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info, Calendar 
 import DeliveryCalculator from './DeliveryCalculator'; 
 import { getMinutesFromMidnight, isSlotBlocked } from '../../utils/timeBlocking'; 
 
-// --- INTERNAL COMPONENT: CALENDLY-STYLE TIME PICKER ---
-const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTime }) => {
+const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTime, proposedDuration }) => {
     if (!isOpen) return null;
     const slots = [];
     const startHour = 7;
@@ -18,7 +17,8 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
             const displayMinute = m === 0 ? '00' : '30';
             
             const checkMins = (h * 60) + m; 
-            const isBlocked = isSlotBlocked(checkMins, busyIntervals);
+            // NEW: Passing proposedDuration here!
+            const isBlocked = isSlotBlocked(checkMins, proposedDuration, busyIntervals);
             const isSelected = selectedTime.hour === displayHour.toString() && 
                                selectedTime.minute === displayMinute && 
                                selectedTime.ampm === ampm;
@@ -59,11 +59,10 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
     );
 };
 
-// --- MAIN REQUEST FORM COMPONENT ---
 export default function RequestForm({ 
     formData, setFormData, handleSubmit, handlePhoneInput, 
     timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote,
-    busyIntervals = [] 
+    busyIntervals = [], proposedDuration 
 }) {
     const [showTimePicker, setShowTimePicker] = useState(false);
 
@@ -74,8 +73,11 @@ export default function RequestForm({
     const handleCalculatorUpdate = (calcData) => {
         setFormData(prev => ({
             ...prev,
-            actualWeight: calcData.weight,
+            weightBracket: calcData.weightBracket, 
+            actualWeightLabel: calcData.weight,
             actualDistance: calcData.distance,
+            flights: calcData.flights, 
+            difficultAccess: calcData.difficultAccess, 
             calculatedBasePrice: calcData.baseTotal, 
             requiredTrips: calcData.trips,
             isQuoteRequired: calcData.isQuote,
@@ -87,6 +89,17 @@ export default function RequestForm({
         <>
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
             
+            {/* NEW: Warning for jobs estimated to take 5+ hours (300 mins) */}
+            {proposedDuration >= 300 && (
+                <div className="bg-orange-50 border-l-4 border-orange-500 p-3 mb-4 rounded-r shadow-sm flex items-start animate-in fade-in slide-in-from-top-2">
+                    <AlertTriangle className="h-5 w-5 text-orange-600 mr-2 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-orange-800 font-medium">
+                        <strong className="block uppercase tracking-wide mb-0.5">Large Job Notice</strong>
+                        This job is estimated to take {Math.round(proposedDuration / 60)} hours. Please ensure your start time allows for completion before 6:00 PM.
+                    </p>
+                </div>
+            )}
+
             {busyIntervals.length > 0 && (
                 <div className="bg-orange-50 border-l-4 border-orange-400 p-2 mb-4 rounded-r text-xs text-orange-800 flex items-center animate-in fade-in slide-in-from-top-2">
                     <CalendarIcon className="w-4 h-4 mr-2" />
@@ -129,7 +142,6 @@ export default function RequestForm({
                 
                 <DeliveryCalculator 
                     onUpdate={handleCalculatorUpdate} 
-                    initialWeight={formData.actualWeight || 0.5} 
                     initialDistance={formData.actualDistance || 50} 
                 />
 
@@ -144,7 +156,14 @@ export default function RequestForm({
                             <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition"/>
                         </button>
                     </div>
-                    <TimePickerModal isOpen={showTimePicker} onClose={() => setShowTimePicker(false)} onSelect={handleTimeSelect} busyIntervals={busyIntervals} selectedTime={{ hour: formData.hour, minute: formData.minute, ampm: formData.ampm }} />
+                    <TimePickerModal 
+                        isOpen={showTimePicker} 
+                        onClose={() => setShowTimePicker(false)} 
+                        onSelect={handleTimeSelect} 
+                        busyIntervals={busyIntervals} 
+                        selectedTime={{ hour: formData.hour, minute: formData.minute, ampm: formData.ampm }} 
+                        proposedDuration={proposedDuration} // Passed to modal
+                    />
                 </div>
                 
                 <div className="flex gap-2 mt-2">{['cash', 'bank'].map((m) => (<div key={m} onClick={() => setFormData({...formData, paymentMethod: m})} className={`flex-1 p-2 rounded border cursor-pointer flex items-center justify-between text-sm ${formData.paymentMethod === m ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}><span className="capitalize">{m}</span>{formData.paymentMethod === m && <div className="h-4 w-4 bg-green-500 rounded-full flex items-center justify-center"><CheckCircle className="h-3 w-3 text-white" /></div>}</div>))}</div>
@@ -181,7 +200,6 @@ export default function RequestForm({
                                     <div className="relative z-10"><p className="text-green-800 font-bold text-sm flex items-center"><CheckCircle className="w-4 h-4 mr-1" /> REWARD APPLIED</p><p className="text-xs text-green-700 mt-0.5">-${discount.toFixed(2)}</p></div>
                                 </div>
                             )}
-                            {/* Adjusted Final Total display to complement the top calculator display */}
                             {(isLate || discount > 0) && (
                                 <div className="pt-2 border-t border-gray-200 flex justify-between items-center">
                                     <span className="text-sm font-bold text-gray-700">Final Adjusted Total:</span>

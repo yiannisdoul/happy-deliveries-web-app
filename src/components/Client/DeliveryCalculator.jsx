@@ -1,24 +1,20 @@
 import React, { useState, useEffect } from 'react';
 
 const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
-  // 1. State Management (Inputs stored as strings to prevent the '0 glitch' when deleting)
-  const [weightBracket, setWeightBracket] = useState(1); // 1, 2, 3, or 4
+  const [weightBracket, setWeightBracket] = useState(1); 
   const [distance, setDistance] = useState(initialDistance ? initialDistance.toString() : '');
   const [flights, setFlights] = useState('0');
   const [difficultAccess, setDifficultAccess] = useState(false);
   
-  // 2. Synchronous Math (Calculated every render automatically)
   let trips = 1;
   let baseFee = 60;
   let isQuote = false;
   let weightLabel = "< 1.25";
   let quoteReason = "";
 
-  // Parse strings to numbers safely for calculations
   const distNum = parseInt(distance, 10) || 0;
   const flightsNum = parseInt(flights, 10) || 0;
 
-  // Bracket Logic
   if (weightBracket === 1) { 
       trips = 1; baseFee = 60; weightLabel = "< 1.25"; 
   } else if (weightBracket === 2) { 
@@ -31,7 +27,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
       quoteReason = "Weight exceeds 3.75 Tonnes."; 
   }
 
-  // Long Distance Logic Limit
   if (distNum > 250) {
       isQuote = true;
       quoteReason = weightBracket === 4 
@@ -39,7 +34,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
           : "Distance exceeds 250km limit.";
   }
 
-  // Tapered Distance Logic (Per Trip)
   let perTripDistCost = 0;
   let remainingDist = distNum;
 
@@ -55,7 +49,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
       perTripDistCost += remainingDist * 2.50;
   }
 
-  // Multipliers & Final Totals
   const totalDistCost = isQuote ? 0 : perTripDistCost * trips;
   const stairsCost = isQuote ? 0 : 20 * flightsNum * trips;
   const diffAccessCost = (difficultAccess && !isQuote) ? 30 : 0;
@@ -63,9 +56,13 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
   
   const totalCost = isQuote ? 0 : baseFee + totalDistCost + accessTotal;
 
+  // NEW: Exposed new fields for Time Blocking
   const currentCalcs = {
+    weightBracket, // Added
+    flights: flightsNum, // Added
+    difficultAccess, // Added
     weight: weightLabel, 
-    distance: distNum, // Pass the clean number to the parent
+    distance: distNum, 
     trips,
     tripStandardCost: baseFee,
     distanceCost: totalDistCost,
@@ -74,7 +71,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
     isQuote
   };
 
-  // 3. Notify Parent Component safely without looping
   useEffect(() => {
     if (onUpdate) {
       onUpdate(currentCalcs);
@@ -85,14 +81,12 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
   return (
     <div className="bg-blue-50 p-5 rounded-lg border border-blue-100 space-y-6">
       
-      {/* --- 1. White-Glove Label --- */}
       <div className="text-center pt-2">
         <p className="text-[10px] sm:text-xs font-bold text-blue-600 bg-blue-100 inline-block px-4 py-2 rounded-full uppercase tracking-wide shadow-sm">
            White-Glove Service: Includes manual handling, inside delivery, and multi-trip discounts.
         </p>
       </div>
 
-      {/* --- 2. Locked Weight Slider (4 Steps) --- */}
       <div>
         <div className="flex justify-between items-center mb-2">
           <label className="text-xs font-bold text-blue-800 uppercase">Weight Bracket</label>
@@ -115,7 +109,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
         </div>
       </div>
 
-      {/* --- 3. Trip/Distance Summary --- */}
       {!currentCalcs.isQuote && (
         <div className="text-center pb-2">
           <p className="text-sm font-bold text-blue-700">
@@ -126,7 +119,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
         </div>
       )}
 
-      {/* --- 4. Distance Input --- */}
       <div>
         <label className="text-xs font-bold text-blue-800 uppercase block mb-2">Distance (km)</label>
         <input 
@@ -138,12 +130,10 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
         />
       </div>
 
-      {/* --- 5. Additional Access Options --- */}
       <div>
         <label className="text-xs font-bold text-blue-800 uppercase block mb-3">Access Surcharges</label>
         
         <div className="space-y-3">
-            {/* Flights Input */}
             <div className="flex items-center justify-between p-3 bg-white rounded border border-blue-100 shadow-sm focus-within:border-blue-400 transition-colors">
                 <span className="text-sm font-medium text-blue-900">Flights of Stairs ($20/flight per trip)</span>
                 <input 
@@ -155,7 +145,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
                 />
             </div>
 
-            {/* Difficult Access Toggle */}
             <label className="flex items-center text-sm font-medium text-blue-900 cursor-pointer p-3 bg-white rounded border border-blue-100 shadow-sm hover:border-blue-300 transition-colors">
                 <input 
                     type="checkbox" 
@@ -168,7 +157,6 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
         </div>
       </div>
 
-      {/* --- 6. Bottom Focal Point: Total Pricing --- */}
       <div className="text-center pt-6 border-t-2 border-blue-200">
         {currentCalcs.isQuote ? (
           <div className="animate-pulse py-2">

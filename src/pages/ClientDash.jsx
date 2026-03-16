@@ -45,7 +45,9 @@ export default function ClientDash() {
         notes: '', paymentMethod: 'cash',
         date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM',
         acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
-        actualWeight: 0.5, actualDistance: 50, calculatedBasePrice: 0, requiredTrips: 1,
+        weightBracket: 1, actualWeightLabel: '< 1.25', actualDistance: 50, 
+        flights: 0, difficultAccess: false,
+        calculatedBasePrice: 0, requiredTrips: 1,
         isQuoteRequired: false, accessCost: 0
     });
 
@@ -69,6 +71,7 @@ export default function ClientDash() {
         }); return () => unsubscribeAuth();
     }, []);
 
+    // Time Blocking Fetching Effect
     useEffect(() => {
         if (!formData.date) return;
         const q = query(collection(db, "requests"), where("date", "==", formData.date));
@@ -77,9 +80,25 @@ export default function ClientDash() {
             snapshot.docs.forEach(doc => {
                 const job = doc.data();
                 if (job.status === 'rejected' || doc.id === editingId) return;
+                
                 const startMins = getMinutesFromMidnight(job.hour, job.minute, job.ampm);
-                let distForCalc = job.actualDistance || 50; let weightForCalc = job.actualWeight || 0.5;
-                const duration = calculateJobDuration(distForCalc, weightForCalc, job.date, job.hour, job.ampm);
+                
+                // Fallback bracket logic for older/legacy jobs in your database
+                let bracketToUse = job.weightBracket;
+                if (!bracketToUse && job.actualWeight) {
+                    if (job.actualWeight <= 1.25) bracketToUse = 1;
+                    else if (job.actualWeight <= 2.5) bracketToUse = 2;
+                    else if (job.actualWeight <= 3.75) bracketToUse = 3;
+                    else bracketToUse = 4;
+                }
+
+                const duration = calculateJobDuration(
+                    bracketToUse || 1, 
+                    job.actualDistance || 50, 
+                    job.flights || 0, 
+                    job.difficultAccess || false
+                );
+                
                 intervals.push({ start: startMins, end: startMins + duration });
             }); setBusyIntervals(intervals);
         }, (error) => { console.error("Error fetching time slots:", error); });
@@ -106,6 +125,14 @@ export default function ClientDash() {
     const isQuote = formData.isQuoteRequired || false;
     const timeStatus = getTimeValidation();
     
+    // Calculate the duration of the current configuration
+    const currentProposedDuration = calculateJobDuration(
+        formData.weightBracket, 
+        formData.actualDistance, 
+        formData.flights, 
+        formData.difficultAccess
+    );
+    
     const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
     let calculatedHour24 = parseInt(formData.hour);
     if (formData.ampm === 'PM' && calculatedHour24 !== 12) calculatedHour24 += 12;
@@ -127,7 +154,9 @@ export default function ClientDash() {
         setFormData({
             ...job, paymentMethod: job.paymentMethod || 'cash', acceptSurcharge: job.totalAmount > job.amount, 
             poType: job.purchaseOrder === 'N/A' ? 'na' : 'entry', purchaseOrder: job.purchaseOrder === 'N/A' ? '' : job.purchaseOrder,
-            actualWeight: job.actualWeight || 0.5, actualDistance: job.actualDistance || 50, calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0
+            weightBracket: job.weightBracket || 1, actualWeightLabel: job.weightLabel || '< 1.25', actualDistance: job.actualDistance || 50, 
+            flights: job.flights || 0, difficultAccess: job.difficultAccess || false,
+            calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0
         }); window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     
@@ -171,7 +200,8 @@ export default function ClientDash() {
         setLoading(true);
         try {
             const finalPO = formData.poType === 'na' ? "N/A" : formData.purchaseOrder;
-            const distLabel = `${formData.actualDistance} km`; const weightLabel = `${formData.actualWeight} Tonnes`;
+            const distLabel = `${formData.actualDistance} km`; 
+            const weightLabel = `${formData.actualWeightLabel} Tonnes`;
 
             const payload = {
                 ...formData, purchaseOrder: finalPO, 
@@ -180,7 +210,10 @@ export default function ClientDash() {
                 clientEmail: auth.currentUser.email, clientId: auth.currentUser.uid, 
                 status: 'pending', updatedAt: serverTimestamp(), rewardUsed: useRewardOnThisJob && discount > 0,
             };
+            
+            // Cleanup transient states
             delete payload.poType;
+            delete payload.actualWeightLabel;
 
             if (!editingId) {
                 payload.createdAt = serverTimestamp();
@@ -197,7 +230,7 @@ export default function ClientDash() {
             setFormData({ 
                 pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '', notes: '', paymentMethod: 'cash', 
                 date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
-                actualWeight: 0.5, actualDistance: 50, calculatedBasePrice: 0, requiredTrips: 1, isQuoteRequired: false, accessCost: 0
+                weightBracket: 1, actualWeightLabel: '< 1.25', actualDistance: 50, flights: 0, difficultAccess: false, calculatedBasePrice: 0, requiredTrips: 1, isQuoteRequired: false, accessCost: 0
             });
         } catch (e) { console.error(e); alert("Error submitting: " + e.message); } finally { setLoading(false); }
     };
@@ -222,7 +255,12 @@ export default function ClientDash() {
                             </div>
                             
                             <div id="request-form-target">
-                                <RequestForm formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput} timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount} editingId={editingId} loading={loading} isQuote={isQuote} busyIntervals={busyIntervals} />
+                                <RequestForm 
+                                    formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput} 
+                                    timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount} 
+                                    editingId={editingId} loading={loading} isQuote={isQuote} busyIntervals={busyIntervals} 
+                                    proposedDuration={currentProposedDuration} 
+                                />
                             </div>
                         </div>
                     </div>
