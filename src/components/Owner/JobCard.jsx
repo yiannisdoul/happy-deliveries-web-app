@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
     CheckCircle, XCircle, Calendar, AlertCircle, User, PenTool, 
-    X, Package, Star, Clock, Truck, Scale
+    X, Package, Star, Clock, Truck, Scale, AlertTriangle
 } from 'lucide-react'; 
 
 const getStatusBadge = (status) => {
@@ -22,8 +22,11 @@ const createGoogleCalendarLink = (job, clientInfo = {}) => {
     const phoneDisplay = clientInfo.phone ? `+61 ${clientInfo.phone}` : 'No Phone';
     const clientName = clientInfo.fullName || 'Unknown';
     
+    // Add access details to the calendar event if they exist
+    const accessNotes = job.accessCost > 0 ? `\nACCESS FEE APPLIED: $${job.accessCost}` : '';
+    
     const title = encodeURIComponent(`Delivery: ${job.from} --> ${job.to}`);
-    const details = encodeURIComponent(`CLIENT: ${clientName} (${phoneDisplay})\nDetails: ${job.distanceLabel || ''} / ${job.weightLabel || ''}\nPrice: $${job.totalAmount||job.amount}\nPO: ${job.purchaseOrder||'N/A'}\nNotes: ${job.notes}`);
+    const details = encodeURIComponent(`CLIENT: ${clientName} (${phoneDisplay})\nDetails: ${job.distanceLabel || ''} / ${job.weightLabel || ''}\nPrice: $${job.totalAmount||job.amount}\nPO: ${job.purchaseOrder||'N/A'}${accessNotes}\nNotes: ${job.notes}`);
     
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${formatTime(hour, job.minute)}/${formatTime(hour + 1, job.minute)}`;
 };
@@ -101,11 +104,18 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                         </div>
                     </div>
                     
-                    {/* NEW: DISPLAY DISTANCE & WEIGHT FOR OWNER */}
+                    {/* DISPLAY DISTANCE & WEIGHT */}
                     {job.distanceLabel && job.weightLabel && (
                         <div className="flex gap-3 text-xs font-bold text-slate-700 bg-slate-100 p-2 rounded justify-center sm:justify-start">
                             <span className="flex items-center"><Truck className="h-3 w-3 mr-1 text-slate-500"/> {job.distanceLabel}</span>
                             <span className="flex items-center"><Scale className="h-3 w-3 mr-1 text-slate-500"/> {job.weightLabel}</span>
+                        </div>
+                    )}
+
+                    {/* NEW: DISPLAY ACCESS SURCHARGES (Stairs / Difficult Access) */}
+                    {job.accessCost > 0 && (
+                        <div className="mt-1 flex gap-3 text-xs font-bold text-orange-800 bg-orange-100 border border-orange-200 p-2 rounded justify-center sm:justify-start">
+                            <span className="flex items-center"><AlertTriangle className="h-3 w-3 mr-1 text-orange-600"/> Includes Access/Stairs Surcharge (+${job.accessCost})</span>
                         </div>
                     )}
 

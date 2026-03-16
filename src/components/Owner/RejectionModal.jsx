@@ -1,8 +1,9 @@
-import React from 'react';
-import { XCircle, X } from 'lucide-react'; 
+import React, { useState } from 'react';
+import { XCircle, X, Calculator } from 'lucide-react'; 
 import { db } from '../../config/firebase'; 
 import { doc, updateDoc } from 'firebase/firestore'; 
 import { sendNotificationEmail, TEMPLATES } from '../../utils/emailService'; 
+import DeliveryCalculator from '../Client/DeliveryCalculator'; // <-- IMPORT CALCULATOR
 
 export default function RejectionModal({
     rejectingJobId, setRejectingJobId,
@@ -12,6 +13,9 @@ export default function RejectionModal({
     counterAmpm, setCounterAmpm, isSubmitting, setIsSubmitting,
     clientEmail, clientName 
 }) {
+    // Local state to toggle the calculator visibility
+    const [showCalculator, setShowCalculator] = useState(false);
+
     if (!rejectingJobId) return null;
 
     const handleSubmitRejection = async (e) => {
@@ -39,10 +43,9 @@ export default function RejectionModal({
                 hasClientCountered: false 
             });
 
-            // FIX: Ensure clientEmail is available before sending
             if (clientEmail) {
                 sendNotificationEmail(TEMPLATES.CLIENT_STATUS_UPDATE, {
-                    to_name: clientName || clientEmail, // Robust to_name fallback
+                    to_name: clientName || clientEmail, 
                     to_email: clientEmail, 
                     subject: "Update: Request Rejected/Counter Offered",
                     message: `Your delivery request was rejected by the Owner due to ${rejectionReason}. Please log in to view the note and potential counter-offer.`,
@@ -51,9 +54,11 @@ export default function RejectionModal({
                 });
             }
 
+            // Reset states
             setRejectingJobId(null);
             setRejectionNote('');
             setCounterPrice('');
+            setShowCalculator(false); // Reset calculator visibility
             alert("Request Rejected with Details sent to client.");
         } catch (e) {
             console.error("Rejection Error:", e);
@@ -63,9 +68,14 @@ export default function RejectionModal({
         }
     };
     
+    // --- Auto-fill handler for the calculator ---
+    const handleCalculatorUpdate = (calcData) => {
+        setCounterPrice(calcData.baseTotal.toFixed(2));
+    };
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 overflow-y-auto max-h-[90vh]">
               <div className="flex justify-between items-center mb-4 border-b pb-2">
                  <h3 className="text-lg font-bold text-red-600 flex items-center"><XCircle className="h-5 w-5 mr-2"/> Reject Request</h3>
                  <button onClick={() => setRejectingJobId(null)} className="text-gray-400 hover:text-gray-600"><X /></button>
@@ -87,15 +97,42 @@ export default function RejectionModal({
 
                  {/* COUNTER OFFER: PRICE */}
                  {rejectionReason === 'price' && (
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Proposed Price ($)</label>
-                        <input 
-                            type="number" 
-                            required
-                            className="w-full border border-gray-300 rounded-lg p-2 text-sm"
-                            value={counterPrice}
-                            onChange={(e) => setCounterPrice(e.target.value)}
-                        />
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Proposed Price ($)</label>
+                            <input 
+                                type="number" 
+                                required
+                                className="w-full border border-gray-300 rounded-lg p-2 text-sm"
+                                value={counterPrice}
+                                onChange={(e) => setCounterPrice(e.target.value)}
+                            />
+                        </div>
+
+                        {/* --- CALCULATOR TOOL --- */}
+                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                            <button 
+                                type="button" 
+                                onClick={() => setShowCalculator(!showCalculator)}
+                                className="flex items-center text-sm font-bold text-blue-700 hover:text-blue-900 w-full transition-colors"
+                            >
+                                <Calculator className="h-4 w-4 mr-2" />
+                                {showCalculator ? 'Hide Pricing Calculator' : 'Open Pricing Calculator'}
+                            </button>
+                            
+                            {showCalculator && (
+                                <div className="mt-4 animate-in fade-in slide-in-from-top-1">
+                                    <DeliveryCalculator 
+                                        onUpdate={handleCalculatorUpdate} 
+                                        initialWeight={0.5} 
+                                        initialDistance={50} 
+                                    />
+                                    <p className="text-[10px] text-blue-600 mt-2 text-center italic">
+                                        Adjusting sliders will automatically update the Proposed Price above.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                  )}
 

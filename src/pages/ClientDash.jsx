@@ -4,14 +4,9 @@ import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, upd
 import { onAuthStateChanged } from 'firebase/auth';
 import { REWARD_VALUE, COMPANY_EMAIL } from '../utils/constants';
 import { useNavigate } from 'react-router-dom';
-
-// UTILS
 import { checkAndPerformReset } from '../utils/resetLogic';
-import { calculatePrice, DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../utils/pricingCalculator';
 import { calculateJobDuration, getMinutesFromMidnight } from '../utils/timeBlocking'; 
 import { sendNotificationEmail, TEMPLATES } from '../utils/emailService';
-
-// COMPONENTS
 import LoyaltyCard from '../components/Client/LoyaltyCard';
 import RequestForm from '../components/Client/RequestForm';
 import ClientJobCard from '../components/Client/JobCard';
@@ -20,9 +15,7 @@ import CounterOfferModal from '../components/Client/CounterOfferModal';
 import GamificationBar from '../components/Client/GamificationBar';
 
 const getTomorrowDate = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
+    const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0];
 };
 
 export default function ClientDash() {
@@ -32,17 +25,12 @@ export default function ClientDash() {
     const [editingId, setEditingId] = useState(null); 
     const [loading, setLoading] = useState(false);
     const [viewProofJob, setViewProofJob] = useState(null);
-    
-    // --- TIME BLOCKING STATE ---
     const [busyIntervals, setBusyIntervals] = useState([]); 
-    
-    // --- LOYALTY & GAMIFICATION STATE ---
     const [stamps, setStamps] = useState(0); 
     const [rewardCount, setRewardCount] = useState(0); 
     const [monthlyCount, setMonthlyCount] = useState(0); 
     const [useRewardOnThisJob, setUseRewardOnThisJob] = useState(false); 
     
-    // --- COUNTER MODAL STATE ---
     const [counteringJob, setCounteringJob] = useState(null); 
     const [counterNote, setCounterNote] = useState('');
     const [counterPrice, setCounterPrice] = useState('');
@@ -51,99 +39,54 @@ export default function ClientDash() {
     const [counterMinute, setCounterMinute] = useState('00');
     const [counterAmpm, setCounterAmpm] = useState('AM');
 
-    // --- FORM DATA ---
     const [formData, setFormData] = useState({
         pickupName: '', pickupPhone: '', from: '',
         dropoffName: '', dropoffPhone: '', to: '',
         notes: '', paymentMethod: 'cash',
-        date: getTomorrowDate(),
-        hour: '10', minute: '00', ampm: 'AM',
+        date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM',
         acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
-        distIndex: 2, 
-        weightIndex: 0
+        actualWeight: 0.5, actualDistance: 50, calculatedBasePrice: 0, requiredTrips: 1,
+        isQuoteRequired: false, accessCost: 0
     });
 
-    // 1. MAIN DATA FETCHING (User Profile & Their Own Jobs)
     useEffect(() => {
         let unsubscribeSnapshot = () => {};
-        
         const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
             if (user) {
-                // Fetch User Profile
                 const userRef = doc(db, "users", user.uid);
                 const unsubscribeUser = onSnapshot(userRef, (userDoc) => {
                     const userData = userDoc.data() || {};
-                    // Run logic to check if a new month started and reset stamps/tiers if needed
                     checkAndPerformReset({ uid: user.uid, ...userData }); 
-                    
-                    setStamps(userData.stamps || 0);
-                    setRewardCount(userData.rewardCount || 0); 
-                    setMonthlyCount(userData.monthly_delivery_count || 0);
+                    setStamps(userData.stamps || 0); setRewardCount(userData.rewardCount || 0); setMonthlyCount(userData.monthly_delivery_count || 0);
                 });
-
-                // Fetch Client's Own Requests
                 const q = query(collection(db, "requests"), where("clientEmail", "==", user.email));
                 unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
                     const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // Sort by createdAt descending (newest first)
-                    docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-                    setJobs(docs);
+                    docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)); setJobs(docs);
                 });
-                
                 return () => { unsubscribeUser(); unsubscribeSnapshot(); };
-            } else {
-                setJobs([]); setStamps(0); setRewardCount(0); setMonthlyCount(0); setUseRewardOnThisJob(false);
-            }
-        });
-        return () => unsubscribeAuth();
+            } else { setJobs([]); setStamps(0); setRewardCount(0); setMonthlyCount(0); setUseRewardOnThisJob(false); }
+        }); return () => unsubscribeAuth();
     }, []);
 
-    // 2. TIME BLOCKING FETCHING (All Active Jobs on Selected Date)
     useEffect(() => {
         if (!formData.date) return;
-
-        // Query ALL requests for the selected date to find conflicts
         const q = query(collection(db, "requests"), where("date", "==", formData.date));
-        
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const intervals = [];
-            
             snapshot.docs.forEach(doc => {
                 const job = doc.data();
-                
-                // Ignore rejected jobs (they don't block time)
-                // Ignore the job currently being edited (so you don't block yourself moving your own job)
                 if (job.status === 'rejected' || doc.id === editingId) return;
-
-                // 1. Calculate Start Time (Minutes from midnight)
                 const startMins = getMinutesFromMidnight(job.hour, job.minute, job.ampm);
-
-                // 2. Reconstruct Indices for calculation (Fallback to defaults if missing)
-                let dIndex = DISTANCE_OPTIONS.findIndex(o => o.label === job.distanceLabel);
-                if (dIndex === -1) dIndex = 2; // Default 50-75km
-                
-                let wIndex = WEIGHT_OPTIONS.findIndex(o => o.label === job.weightLabel);
-                if (wIndex === -1) wIndex = 0; // Default <1t
-
-                // 3. Calculate Duration using the Utility
-                const duration = calculateJobDuration(dIndex, wIndex, job.date, job.hour, job.ampm);
-                
-                // 4. Add to Busy Intervals
+                let distForCalc = job.actualDistance || 50; let weightForCalc = job.actualWeight || 0.5;
+                const duration = calculateJobDuration(distForCalc, weightForCalc, job.date, job.hour, job.ampm);
                 intervals.push({ start: startMins, end: startMins + duration });
-            });
-            
-            setBusyIntervals(intervals);
-        }, (error) => {
-            console.error("Error fetching time slots (Check Firestore Rules):", error);
-        });
-
+            }); setBusyIntervals(intervals);
+        }, (error) => { console.error("Error fetching time slots:", error); });
         return () => unsubscribe();
     }, [formData.date, editingId]); 
 
-    const filteredJobs = jobs.filter(job => {
-        if (filter === 'all') return true;
-        return job.status === filter;
-    });
+    const filteredJobs = jobs.filter(job => { if (filter === 'all') return true; return job.status === filter; });
 
     const getTimeValidation = () => {
         let hour24 = parseInt(formData.hour);
@@ -151,8 +94,7 @@ export default function ClientDash() {
         if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
         const [year, month, day] = formData.date.split('-').map(Number);
         const bookingTime = new Date(year, month - 1, day, hour24, parseInt(formData.minute));
-        const now = new Date();
-        const diffMs = bookingTime - now;
+        const diffMs = bookingTime - new Date();
         const diffHours = diffMs / (1000 * 60 * 60);
         
         if (diffMs < 0) return { isValid: false, error: "Time cannot be in the past." };
@@ -161,102 +103,47 @@ export default function ClientDash() {
         return { isValid: true, error: null };
     };
 
-    const calculateTotal = () => {
-        // 1. Base Price
-        const { price, isQuote } = calculatePrice(formData.distIndex, formData.weightIndex);
-        
-        if (isQuote) {
-            return { total: 0, subtotal: 0, surcharge: 0, isLate: false, discount: 0, isQuote: true };
-        }
-
-        // 2. Surcharge Logic
-        const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
-        let hour24 = parseInt(formData.hour);
-        if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
-        if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
-        const isLate = isToday && hour24 >= 14; 
-        
-        let subtotal = price;
-        let surcharge = 0;
-        let discount = 0;
-
-        if (isLate) { 
-            const rawSurcharge = price * 0.5;
-            surcharge = Math.round(rawSurcharge / 5) * 5; 
-            subtotal += surcharge; 
-        }
-        
-        // 3. Discount Logic
-        if (useRewardOnThisJob && rewardCount > 0) {
-            discount = Math.min(subtotal, REWARD_VALUE);
-            subtotal = Math.max(0, subtotal - discount);
-        }
-
-        return { total: subtotal, subtotal: subtotal, surcharge, isLate, discount, isQuote: false };
-    };
-    
-    const { total, subtotal, surcharge, isLate, discount, isQuote } = calculateTotal();
+    const isQuote = formData.isQuoteRequired || false;
     const timeStatus = getTimeValidation();
+    
+    const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
+    let calculatedHour24 = parseInt(formData.hour);
+    if (formData.ampm === 'PM' && calculatedHour24 !== 12) calculatedHour24 += 12;
+    if (formData.ampm === 'AM' && calculatedHour24 === 12) calculatedHour24 = 0;
+    
+    const isLate = isToday && calculatedHour24 >= 14; 
+    let baseSubtotal = formData.calculatedBasePrice || 0;
+    let surchargeCost = 0; let discountApplied = 0;
 
-    const handlePhoneInput = (val, field) => {
-        const numericOnly = val.replace(/\D/g, '');
-        if (numericOnly.length <= 9) setFormData(prev => ({ ...prev, [field]: numericOnly }));
-    };
+    if (isLate) { surchargeCost = Math.round((baseSubtotal * 0.5) / 5) * 5; baseSubtotal += surchargeCost; }
+    if (useRewardOnThisJob && rewardCount > 0) { discountApplied = Math.min(baseSubtotal, REWARD_VALUE); baseSubtotal = Math.max(0, baseSubtotal - discountApplied); }
+
+    const total = baseSubtotal; const subtotal = formData.calculatedBasePrice || 0; const surcharge = surchargeCost; const discount = discountApplied;
+
+    const handlePhoneInput = (val, field) => { const numericOnly = val.replace(/\D/g, ''); if (numericOnly.length <= 9) setFormData(prev => ({ ...prev, [field]: numericOnly })); };
 
     const handleEdit = (job) => {
         setEditingId(job.id);
-        const isNA = job.purchaseOrder === 'N/A';
-        
-        const dIndex = DISTANCE_OPTIONS.findIndex(o => o.label === job.distanceLabel);
-        const wIndex = WEIGHT_OPTIONS.findIndex(o => o.label === job.weightLabel);
-
         setFormData({
-            ...job, paymentMethod: job.paymentMethod || 'cash',
-            acceptSurcharge: job.totalAmount > job.amount, 
-            poType: isNA ? 'na' : 'entry',
-            purchaseOrder: isNA ? '' : job.purchaseOrder,
-            distIndex: dIndex !== -1 ? dIndex : 2, 
-            weightIndex: wIndex !== -1 ? wIndex : 0
-        });
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+            ...job, paymentMethod: job.paymentMethod || 'cash', acceptSurcharge: job.totalAmount > job.amount, 
+            poType: job.purchaseOrder === 'N/A' ? 'na' : 'entry', purchaseOrder: job.purchaseOrder === 'N/A' ? '' : job.purchaseOrder,
+            actualWeight: job.actualWeight || 0.5, actualDistance: job.actualDistance || 50, calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0
+        }); window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     
-    // --- COUNTER MODAL HANDLERS ---
     const openCounterModal = (job) => { 
         setCounteringJob(job); setCounterNote(job.rejectionDetails?.note || ''); setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); 
-        if (job.rejectionDetails?.counterTime) {
-            setCounterDate(job.rejectionDetails.counterTime.date); setCounterHour(job.rejectionDetails.counterTime.hour); setCounterMinute(job.rejectionDetails.counterTime.minute); setCounterAmpm(job.rejectionDetails.counterTime.ampm);
-        }
+        if (job.rejectionDetails?.counterTime) { setCounterDate(job.rejectionDetails.counterTime.date); setCounterHour(job.rejectionDetails.counterTime.hour); setCounterMinute(job.rejectionDetails.counterTime.minute); setCounterAmpm(job.rejectionDetails.counterTime.ampm); }
     };
 
     const handleSubmitCounterModal = async (e) => { 
-        e.preventDefault(); 
-        if(!confirm("Are you sure you want to send this counter-offer?")) return; 
+        e.preventDefault(); if(!confirm("Are you sure you want to send this counter-offer?")) return; 
         try { 
-            const updates = { 
-                status: 'pending', hasUnreadEdit: true, hasClientCountered: true, 
-                rejectionDetails: null, updatedAt: serverTimestamp(), notes: counterNote
-            };
-            if (counteringJob.rejectionDetails?.reason === 'price') {
-                updates.amount = parseFloat(counterPrice); updates.totalAmount = parseFloat(counterPrice);
-            } else if (counteringJob.rejectionDetails?.reason === 'time') {
-                updates.date = counterDate; updates.hour = counterHour; updates.minute = counterMinute; updates.ampm = counterAmpm;
-            }
+            const updates = { status: 'pending', hasUnreadEdit: true, hasClientCountered: true, rejectionDetails: null, updatedAt: serverTimestamp(), notes: counterNote };
+            if (counteringJob.rejectionDetails?.reason === 'price') { updates.amount = parseFloat(counterPrice); updates.totalAmount = parseFloat(counterPrice); } 
+            else if (counteringJob.rejectionDetails?.reason === 'time') { updates.date = counterDate; updates.hour = counterHour; updates.minute = counterMinute; updates.ampm = counterAmpm; }
             await updateDoc(doc(db, "requests", counteringJob.id), updates); 
-            
-            // EMAIL ALERT: Counter Offer Received (Owner)
-            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
-                to_name: "Owner",
-                to_email: COMPANY_EMAIL,
-                subject: "Counter Offer Received",
-                message: `Client ${auth.currentUser.email} has sent a counter-offer.`,
-                status: "Pending Review",
-                total_price: `$${total.toFixed(2)}`,
-                client_email: auth.currentUser.email,
-                job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`,
-                link: "https://dashboard.happydeliveries.com.au/owner"
-            });
-
+            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { to_name: "Owner", to_email: COMPANY_EMAIL, subject: "Counter Offer Received", message: `Client ${auth.currentUser.email} has sent a counter-offer.`, status: "Pending Review", total_price: `$${total.toFixed(2)}`, client_email: auth.currentUser.email, job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`, link: "https://dashboard.happydeliveries.com.au/owner" });
             alert("Counter Offer Sent!"); setCounteringJob(null); 
         } catch(e) { alert("Error sending counter: " + e.message); } 
     };
@@ -268,20 +155,7 @@ export default function ClientDash() {
         if (job.rejectionDetails?.counterTime) { const t = job.rejectionDetails.counterTime; updates.date = t.date; updates.hour = t.hour; updates.minute = t.minute; updates.ampm = t.ampm; }
         try { 
             await updateDoc(doc(db, "requests", job.id), updates); 
-            
-            // EMAIL ALERT: Offer Accepted (Owner)
-            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
-                to_name: "Owner",
-                to_email: COMPANY_EMAIL,
-                subject: "Offer Accepted by Client",
-                message: `Client ${auth.currentUser.email} accepted your counter-offer.`,
-                status: "Accepted",
-                total_price: `$${total.toFixed(2)}`,
-                client_email: auth.currentUser.email,
-                job_time: `${job.date} @ ${job.hour}:${job.minute} ${job.ampm}`,
-                link: "https://dashboard.happydeliveries.com.au/owner"
-            });
-
+            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { to_name: "Owner", to_email: COMPANY_EMAIL, subject: "Offer Accepted by Client", message: `Client ${auth.currentUser.email} accepted your counter-offer.`, status: "Accepted", total_price: `$${total.toFixed(2)}`, client_email: auth.currentUser.email, job_time: `${job.date} @ ${job.hour}:${job.minute} ${job.ampm}`, link: "https://dashboard.happydeliveries.com.au/owner" });
             alert("Offer Accepted!"); 
         } catch { alert("Error."); }
     };
@@ -297,113 +171,58 @@ export default function ClientDash() {
         setLoading(true);
         try {
             const finalPO = formData.poType === 'na' ? "N/A" : formData.purchaseOrder;
-            const distLabel = DISTANCE_OPTIONS[formData.distIndex].label;
-            const weightLabel = WEIGHT_OPTIONS[formData.weightIndex].label;
+            const distLabel = `${formData.actualDistance} km`; const weightLabel = `${formData.actualWeight} Tonnes`;
 
             const payload = {
                 ...formData, purchaseOrder: finalPO, 
                 amount: subtotal + discount - surcharge, surcharge: surcharge, totalAmount: total, 
                 distanceLabel: distLabel, weightLabel: weightLabel,
                 clientEmail: auth.currentUser.email, clientId: auth.currentUser.uid, 
-                status: 'pending', updatedAt: serverTimestamp(),
-                rewardUsed: useRewardOnThisJob && discount > 0,
+                status: 'pending', updatedAt: serverTimestamp(), rewardUsed: useRewardOnThisJob && discount > 0,
             };
-            
-            delete payload.poType; delete payload.distIndex; delete payload.weightIndex;
+            delete payload.poType;
 
             if (!editingId) {
                 payload.createdAt = serverTimestamp();
-                const docRef = await addDoc(collection(db, "requests"), payload);
-                
-                // EMAIL ALERT: New Delivery Request (Owner)
-                sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
-                    to_name: "Owner",
-                    to_email: COMPANY_EMAIL,
-                    subject: "New Delivery Request",
-                    message: `New Job from ${formData.pickupName} to ${formData.dropoffName} (${distLabel}, ${weightLabel}) submitted by ${auth.currentUser.email}.`,
-                    status: "Pending",
-                    total_price: `$${total.toFixed(2)}`,
-                    client_email: auth.currentUser.email,
-                    job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`,
-                    link: "https://dashboard.happydeliveries.com.au/owner"
-                });
-
+                await addDoc(collection(db, "requests"), payload);
+                sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { to_name: "Owner", to_email: COMPANY_EMAIL, subject: "New Delivery Request", message: `New Job from ${formData.pickupName} to ${formData.dropoffName} (${distLabel}, ${weightLabel}) submitted.`, status: "Pending", total_price: `$${total.toFixed(2)}`, client_email: auth.currentUser.email, job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`, link: "https://dashboard.happydeliveries.com.au/owner" });
                 alert(`Request Sent! Total: $${total.toFixed(2)}.`);
-                if (payload.rewardUsed) {
-                    await updateDoc(doc(db, "users", auth.currentUser.uid), { rewardCount: rewardCount - 1 });
-                    setUseRewardOnThisJob(false); 
-                }
+                if (payload.rewardUsed) { await updateDoc(doc(db, "users", auth.currentUser.uid), { rewardCount: rewardCount - 1 }); setUseRewardOnThisJob(false); }
             } else {
                 await updateDoc(doc(db, "requests", editingId), { ...payload, hasUnreadEdit: true });
-                
-                // EMAIL ALERT: Request Updated (Owner)
-                sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, {
-                    to_name: "Owner",
-                    to_email: COMPANY_EMAIL,
-                    subject: "Request Updated by Client",
-                    message: `Client ${auth.currentUser.email} updated a request.`,
-                    status: "Pending",
-                    total_price: `$${total.toFixed(2)}`,
-                    client_email: auth.currentUser.email,
-                    job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`,
-                    link: "https://dashboard.happydeliveries.com.au/owner"
-                });
-
+                sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { to_name: "Owner", to_email: COMPANY_EMAIL, subject: "Request Updated by Client", message: `Client ${auth.currentUser.email} updated a request.`, status: "Pending", total_price: `$${total.toFixed(2)}`, client_email: auth.currentUser.email, job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`, link: "https://dashboard.happydeliveries.com.au/owner" });
                 alert("Request Updated!"); setEditingId(null);
             }
             
             setFormData({ 
-                pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '',
-                notes: '', paymentMethod: 'cash', 
-                date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', 
-                acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
-                distIndex: 2, weightIndex: 0
+                pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '', notes: '', paymentMethod: 'cash', 
+                date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
+                actualWeight: 0.5, actualDistance: 50, calculatedBasePrice: 0, requiredTrips: 1, isQuoteRequired: false, accessCost: 0
             });
-        } catch (e) {
-            console.error(e);
-            alert("Error submitting: " + e.message);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); alert("Error submitting: " + e.message); } finally { setLoading(false); }
     };
 
     return (
         <div className="max-w-6xl mx-auto px-4 py-6">
             <ProofViewModal viewProofJob={viewProofJob} setViewProofJob={setViewProofJob} />
-            <CounterOfferModal
-                counteringJob={counteringJob} setCounteringJob={setCounteringJob} handleSubmitCounterModal={handleSubmitCounterModal}
-                counterNote={counterNote} setCounterNote={setCounterNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice}
-                counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={counterHour}
-                counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
-            />
+            <CounterOfferModal counteringJob={counteringJob} setCounteringJob={setCounteringJob} handleSubmitCounterModal={handleSubmitCounterModal} counterNote={counterNote} setCounterNote={setCounterNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice} counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={counterHour} counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm} />
 
             <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
                 <div className="md:col-span-1 order-1">
                     <div className="space-y-4">
                         <div id="gamification-bar-target" className="relative">
                             <GamificationBar monthlyDeliveryCount={monthlyCount} />
-                            <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/tier-program')}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
-                                <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">View details on tiers, floors, and rollover protection.</div>
-                            </div>
+                            <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/tier-program')}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg><div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">View details on tiers, floors, and rollover protection.</div></div>
                         </div>
 
                         <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
                             <div id="loyalty-card-target" className="relative">
                                 <LoyaltyCard stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob} setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} />
-                                <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/loyalty-program')}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
-                                    <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">Details on stamp earning, rewards, and how tiers affect your goal.</div>
-                                </div>
+                                <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/loyalty-program')}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg><div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">Details on stamp earning, rewards, and how tiers affect your goal.</div></div>
                             </div>
                             
                             <div id="request-form-target">
-                                <RequestForm
-                                    formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput}
-                                    timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount}
-                                    editingId={editingId} loading={loading}
-                                    isQuote={isQuote} busyIntervals={busyIntervals}
-                                />
+                                <RequestForm formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput} timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount} editingId={editingId} loading={loading} isQuote={isQuote} busyIntervals={busyIntervals} />
                             </div>
                         </div>
                     </div>

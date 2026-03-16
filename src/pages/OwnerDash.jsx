@@ -5,7 +5,6 @@ import { CLOUD_NAME, UPLOAD_PRESET, COMPANY_EMAIL } from '../utils/constants';
 import { calculateTier } from '../utils/tierSystem';
 import { sendNotificationEmail, TEMPLATES } from '../utils/emailService'; 
 
-// IMPORT COMPONENTS
 import JobCard from '../components/Owner/JobCard';
 import RejectionModal from '../components/Owner/RejectionModal';
 import DeliveryModal from '../components/Owner/DeliveryModal';
@@ -53,14 +52,12 @@ export default function OwnerDash() {
   const handleStatus = async (id, newStatus) => {
     try { 
         await updateDoc(doc(db, "requests", id), { status: newStatus, hasUnreadEdit: false }); 
-        
         const job = jobs.find(j => j.id === id);
         if (job && job.clientEmail) {
             const client = clientMap[job.clientId] || {};
-            
             if (newStatus === 'accepted') {
                 sendNotificationEmail(TEMPLATES.CLIENT_STATUS_UPDATE, {
-                    to_name: client.fullName || job.clientEmail, // FIX: Robust to_name
+                    to_name: client.fullName || job.clientEmail, 
                     to_email: job.clientEmail,
                     subject: "Your Delivery is Booked!",
                     message: `Your request from ${job.from} to ${job.to} on ${job.date} at ${job.hour}:${job.minute} ${job.ampm} has been accepted and scheduled for pickup.`,
@@ -128,11 +125,10 @@ export default function OwnerDash() {
       
       try { await handleLoyaltyStamping(job.clientId, job); } catch (stampError) { console.error("Loyalty Stamp Failed:", stampError.message); }
       
-      // Send Delivery Confirmation Email
       if (job.clientEmail) {
           const client = clientMap[job.clientId] || {};
           sendNotificationEmail(TEMPLATES.CLIENT_STATUS_UPDATE, {
-              to_name: client.fullName || job.clientEmail, // FIX: Robust to_name
+              to_name: client.fullName || job.clientEmail,
               to_email: job.clientEmail,
               subject: "Delivery Completed",
               message: `Great news! Your delivery to ${job.to} has been completed. Receiver: ${receiverName}.`,
@@ -168,6 +164,7 @@ export default function OwnerDash() {
     });
     return () => unsubscribe();
   }, [isMinimized, dontShowAgain]); 
+
   useEffect(() => {
     const fetchClients = async () => {
       try { const querySnapshot = await getDocs(collection(db, "users"));
@@ -176,13 +173,13 @@ export default function OwnerDash() {
       } catch (e) { console.error("Error fetching clients:", e); }
     }; fetchClients();
   }, []);
+
   const filteredJobs = jobs.filter(job => {
     if (filter === 'all') return true; return job.status === filter;
   });
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 relative min-h-screen pb-24">
-      {/* FILTER HEADER */}
       <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Owner Dashboard</h1>
         <div className="flex bg-gray-100 p-1 rounded-lg space-x-1 overflow-x-auto w-full sm:w-auto">
@@ -207,10 +204,10 @@ export default function OwnerDash() {
           counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={setCounterHour}
           counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm}
           isSubmitting={isSubmitting} setIsSubmitting={setIsSubmitting}
-          // FIX: Added robust fallback to clientEmail for clientName
           clientEmail={jobs.find(j => j.id === rejectingJobId)?.clientEmail}
           clientName={clientMap[jobs.find(j => j.id === rejectingJobId)?.clientId]?.fullName || jobs.find(j => j.id === rejectingJobId)?.clientEmail}
       />
+      
       <DeliveryModal
           deliveringJobId={deliveringJobId} setDeliveringJobId={setDeliveringJobId} receiverName={receiverName}
           setReceiverName={setReceiverName} photoFile={photoFile} setPhotoFile={setPhotoFile} isSubmitting={isSubmitting}

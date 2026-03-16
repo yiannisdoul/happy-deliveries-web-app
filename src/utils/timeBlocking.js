@@ -1,24 +1,16 @@
 // --- CONFIGURATION ---
 
-// 1. Base Travel Time (Minutes) based on Distance Index
-// 0-25km(45), 25-50(75), 50-75(90), 75-100(105), 100-150(120), 150-200(150), 200+(240)
-const BASE_TRAVEL_TIMES = [45, 75, 90, 105, 120, 150, 240];
-
-// 2. Labor Time (Minutes) based on Weight Index
-// <1t(30), 1-2t(45), 2-3t(60), 3t+(90)
-const LABOR_TIMES = [30, 45, 60, 90];
-
 const TRANSITION_BUFFER = 30; // Minutes between jobs
 
 /**
  * Calculates the total duration (in minutes) a job occupies.
- * @param {number} distIndex - Distance slider index (0-6)
- * @param {number} weightIndex - Weight slider index (0-3)
+ * @param {number} distance - Actual distance in km
+ * @param {number} weight - Actual weight in tonnes
  * @param {string} dateStr - "YYYY-MM-DD"
  * @param {string|number} hourStr - Hour (1-12)
  * @param {string} ampm - "AM" or "PM"
  */
-export const calculateJobDuration = (distIndex, weightIndex, dateStr, hourStr, ampm) => {
+export const calculateJobDuration = (distance, weight, dateStr, hourStr, ampm) => {
     // 1. Convert Time to 24h for Traffic Logic
     let hour24 = parseInt(hourStr);
     if (ampm === 'PM' && hour24 !== 12) hour24 += 12;
@@ -40,9 +32,19 @@ export const calculateJobDuration = (distIndex, weightIndex, dateStr, hourStr, a
         else if (hour24 >= 15 && hour24 < 18) trafficMult = 1.5; // Afternoon Peak
     }
 
-    // 4. Calculate Component Times
-    const baseTime = BASE_TRAVEL_TIMES[distIndex] || 45;
-    const laborTime = LABOR_TIMES[weightIndex] || 30;
+    // 4. Calculate Component Times based on actual numbers
+    let baseTime = 45; // Default 0-25km
+    if (distance > 200) baseTime = 240;
+    else if (distance > 150) baseTime = 150;
+    else if (distance > 100) baseTime = 120;
+    else if (distance > 75) baseTime = 105;
+    else if (distance > 50) baseTime = 90;
+    else if (distance > 25) baseTime = 75;
+
+    let laborTime = 30; // Default <1t
+    if (weight > 3) laborTime = 90;
+    else if (weight > 2) laborTime = 60;
+    else if (weight > 1) laborTime = 45;
     
     const travelTimeWithTraffic = Math.round(baseTime * trafficMult);
     

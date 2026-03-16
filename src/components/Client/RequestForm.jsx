@@ -1,28 +1,22 @@
 import React, { useState } from 'react';
 import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info, Calendar as CalendarIcon, X, ChevronRight } from 'lucide-react';
-import { DISTANCE_OPTIONS, WEIGHT_OPTIONS } from '../../utils/pricingCalculator';
+import DeliveryCalculator from './DeliveryCalculator'; 
 import { getMinutesFromMidnight, isSlotBlocked } from '../../utils/timeBlocking'; 
 
 // --- INTERNAL COMPONENT: CALENDLY-STYLE TIME PICKER ---
 const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTime }) => {
     if (!isOpen) return null;
-
-    // Generate slots: 7:00 AM to 6:00 PM in 30-min increments
     const slots = [];
     const startHour = 7;
-    const endHour = 18; // 6 PM
+    const endHour = 18; 
 
     for (let h = startHour; h <= endHour; h++) {
         for (let m = 0; m < 60; m += 30) {
-            // Skip 6:30 PM (End at 6:00 PM sharp)
             if (h === 18 && m > 0) continue;
-
             const ampm = h >= 12 ? 'PM' : 'AM';
-            const displayHour = h > 12 ? h - 12 : h; // Convert 13->1, 12->12
+            const displayHour = h > 12 ? h - 12 : h; 
             const displayMinute = m === 0 ? '00' : '30';
             
-            // Calculate absolute minutes for blocking check
-            // Note: Our helper expects "12" "00" "PM" format logic
             const checkMins = (h * 60) + m; 
             const isBlocked = isSlotBlocked(checkMins, busyIntervals);
             const isSelected = selectedTime.hour === displayHour.toString() && 
@@ -30,12 +24,9 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
                                selectedTime.ampm === ampm;
 
             slots.push({
-                hour: displayHour.toString(),
-                minute: displayMinute,
-                ampm: ampm,
+                hour: displayHour.toString(), minute: displayMinute, ampm: ampm,
                 label: `${displayHour}:${displayMinute} ${ampm}`,
-                isBlocked,
-                isSelected
+                isBlocked, isSelected
             });
         }
     }
@@ -43,41 +34,21 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-                
-                {/* Modal Header */}
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                    <h3 className="font-bold text-gray-800 flex items-center">
-                        <Clock className="w-5 h-5 mr-2 text-blue-600"/> Select a Time
-                    </h3>
+                    <h3 className="font-bold text-gray-800 flex items-center"><Clock className="w-5 h-5 mr-2 text-blue-600"/> Select a Time</h3>
                     <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition"><X className="w-5 h-5 text-gray-500"/></button>
                 </div>
-
-                {/* Legend */}
                 <div className="px-4 py-2 flex gap-4 text-xs font-medium text-gray-500 bg-white border-b border-gray-50">
                     <div className="flex items-center"><span className="w-3 h-3 rounded-full border border-gray-300 mr-1.5"></span> Available</div>
                     <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-gray-200 mr-1.5"></span> Booked</div>
                     <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-blue-600 mr-1.5"></span> Selected</div>
                 </div>
-
-                {/* Slots Grid */}
                 <div className="p-4 overflow-y-auto grid grid-cols-2 gap-3">
                     {slots.map((slot, index) => (
                         <button
-                            key={index}
-                            disabled={slot.isBlocked}
-                            onClick={() => {
-                                onSelect(slot.hour, slot.minute, slot.ampm);
-                                onClose();
-                            }}
-                            className={`
-                                py-3 px-2 rounded-lg text-sm font-bold border transition-all relative
-                                ${slot.isBlocked 
-                                    ? 'bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed line-through decoration-gray-400' 
-                                    : slot.isSelected 
-                                        ? 'bg-blue-600 border-blue-600 text-white shadow-md ring-2 ring-blue-200' 
-                                        : 'bg-white border-gray-200 text-gray-700 hover:border-blue-400 hover:text-blue-600 hover:shadow-sm'
-                                }
-                            `}
+                            key={index} disabled={slot.isBlocked}
+                            onClick={() => { onSelect(slot.hour, slot.minute, slot.ampm); onClose(); }}
+                            className={`py-3 px-2 rounded-lg text-sm font-bold border transition-all relative ${slot.isBlocked ? 'bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed line-through decoration-gray-400' : slot.isSelected ? 'bg-blue-600 border-blue-600 text-white shadow-md ring-2 ring-blue-200' : 'bg-white border-gray-200 text-gray-700 hover:border-blue-400 hover:text-blue-600 hover:shadow-sm'}`}
                         >
                             {slot.label}
                         </button>
@@ -95,15 +66,20 @@ export default function RequestForm({
     busyIntervals = [] 
 }) {
     const [showTimePicker, setShowTimePicker] = useState(false);
-    const currentDist = DISTANCE_OPTIONS[formData.distIndex];
-    const currentWeight = WEIGHT_OPTIONS[formData.weightIndex];
 
     const handleTimeSelect = (h, m, ampm) => {
+        setFormData(prev => ({ ...prev, hour: h, minute: m, ampm: ampm }));
+    };
+
+    const handleCalculatorUpdate = (calcData) => {
         setFormData(prev => ({
             ...prev,
-            hour: h,
-            minute: m,
-            ampm: ampm
+            actualWeight: calcData.weight,
+            actualDistance: calcData.distance,
+            calculatedBasePrice: calcData.baseTotal, 
+            requiredTrips: calcData.trips,
+            isQuoteRequired: calcData.isQuote,
+            accessCost: calcData.accessCost
         }));
     };
 
@@ -111,7 +87,6 @@ export default function RequestForm({
         <>
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
             
-            {/* BUSY STATUS BANNER */}
             {busyIntervals.length > 0 && (
                 <div className="bg-orange-50 border-l-4 border-orange-400 p-2 mb-4 rounded-r text-xs text-orange-800 flex items-center animate-in fade-in slide-in-from-top-2">
                     <CalendarIcon className="w-4 h-4 mr-2" />
@@ -132,7 +107,6 @@ export default function RequestForm({
             
             <form onSubmit={handleSubmit} className="space-y-4">
                 
-                {/* Pickup Section */}
                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
                     <p className="text-xs font-bold text-gray-500 uppercase">Pickup From</p>
                     <input required placeholder="Contact Name" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.pickupName} onChange={e => setFormData({...formData, pickupName: e.target.value})} />
@@ -143,7 +117,6 @@ export default function RequestForm({
                     <input required placeholder="Address (From)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.from} onChange={e => setFormData({...formData, from: e.target.value})} />
                 </div>
                 
-                {/* Dropoff Section */}
                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
                     <p className="text-xs font-bold text-gray-500 uppercase">Dropoff To</p>
                     <input required placeholder="Contact Name" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.dropoffName} onChange={e => setFormData({...formData, dropoffName: e.target.value})} />
@@ -154,68 +127,29 @@ export default function RequestForm({
                     <input required placeholder="Address (To)" className="w-full text-sm p-2 border rounded outline-none focus:ring-1 focus:ring-blue-500" value={formData.to} onChange={e => setFormData({...formData, to: e.target.value})} />
                 </div>
                 
-                {/* Distance & Weight Sliders */}
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-4">
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="text-xs font-bold text-blue-800 uppercase">Est. Distance</label>
-                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">{currentDist.label}</span>
-                        </div>
-                        <input type="range" min="0" max={DISTANCE_OPTIONS.length - 1} step="1" value={formData.distIndex} onChange={(e) => setFormData({...formData, distIndex: parseInt(e.target.value)})} className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                    </div>
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="text-xs font-bold text-blue-800 uppercase">Total Weight</label>
-                            <span className="text-sm font-bold text-blue-900 bg-white px-2 py-0.5 rounded shadow-sm">{currentWeight.label}</span>
-                        </div>
-                        <input type="range" min="0" max={WEIGHT_OPTIONS.length - 1} step="1" value={formData.weightIndex} onChange={(e) => setFormData({...formData, weightIndex: parseInt(e.target.value)})} className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                    </div>
-                </div>
+                <DeliveryCalculator 
+                    onUpdate={handleCalculatorUpdate} 
+                    initialWeight={formData.actualWeight || 0.5} 
+                    initialDistance={formData.actualDistance || 50} 
+                />
 
-                {/* DATE & TIME SECTION (UPDATED) */}
                 <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-gray-500 uppercase mt-1">Date & Time</label>
-                    
                     <div className="flex gap-2">
-                        {/* Date Picker */}
                         <div className="relative flex-1">
-                            <input 
-                                type="date" 
-                                required 
-                                className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" 
-                                value={formData.date} 
-                                onChange={e => setFormData({...formData, date: e.target.value})} 
-                            />
+                            <input type="date" required className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
                         </div>
-
-                        {/* Time Picker Button (Triggers Modal) */}
-                        <button 
-                            type="button"
-                            onClick={() => setShowTimePicker(true)}
-                            className="flex-1 bg-white border border-gray-300 text-gray-700 font-bold py-3 px-4 rounded-lg shadow-sm hover:bg-gray-50 hover:border-blue-400 transition flex items-center justify-between group"
-                        >
-                            <span>
-                                {formData.hour}:{formData.minute} {formData.ampm}
-                            </span>
+                        <button type="button" onClick={() => setShowTimePicker(true)} className="flex-1 bg-white border border-gray-300 text-gray-700 font-bold py-3 px-4 rounded-lg shadow-sm hover:bg-gray-50 hover:border-blue-400 transition flex items-center justify-between group">
+                            <span>{formData.hour}:{formData.minute} {formData.ampm}</span>
                             <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition"/>
                         </button>
                     </div>
-
-                    {/* Render the Modal */}
-                    <TimePickerModal 
-                        isOpen={showTimePicker} 
-                        onClose={() => setShowTimePicker(false)}
-                        onSelect={handleTimeSelect}
-                        busyIntervals={busyIntervals}
-                        selectedTime={{ hour: formData.hour, minute: formData.minute, ampm: formData.ampm }}
-                    />
+                    <TimePickerModal isOpen={showTimePicker} onClose={() => setShowTimePicker(false)} onSelect={handleTimeSelect} busyIntervals={busyIntervals} selectedTime={{ hour: formData.hour, minute: formData.minute, ampm: formData.ampm }} />
                 </div>
                 
-                {/* Payment Method */}
                 <div className="flex gap-2 mt-2">{['cash', 'bank'].map((m) => (<div key={m} onClick={() => setFormData({...formData, paymentMethod: m})} className={`flex-1 p-2 rounded border cursor-pointer flex items-center justify-between text-sm ${formData.paymentMethod === m ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}><span className="capitalize">{m}</span>{formData.paymentMethod === m && <div className="h-4 w-4 bg-green-500 rounded-full flex items-center justify-center"><CheckCircle className="h-3 w-3 text-white" /></div>}</div>))}</div>
                 {formData.paymentMethod === 'bank' && <div className="text-xs bg-blue-50 p-2 rounded text-blue-800 border border-blue-100"><p>BSB: 063-000 | ACC: 1234 5678</p></div>}
                 
-                {/* Purchase Order */}
                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
                     <p className="text-xs font-bold text-gray-500 uppercase">Purchase Order</p>
                     <div className="flex items-center gap-3">
@@ -227,7 +161,6 @@ export default function RequestForm({
                     </div>
                 </div>
                 
-                {/* Pricing & Quote UI */}
                 {isQuote ? (
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow-sm animate-pulse">
                         <div className="flex items-center">
@@ -242,24 +175,25 @@ export default function RequestForm({
                 ) : (
                     timeStatus.isValid ? (
                         <div id="total-section-target" className="space-y-3">
-                            <div className="bg-gray-100 p-3 rounded-lg text-center border border-gray-200">
-                                <p className="text-xs text-gray-500 uppercase font-bold">Estimated Base Price</p>
-                                <p className="text-2xl font-bold text-gray-800">${total > 0 ? (isLate ? (subtotal-surcharge).toFixed(2) : subtotal.toFixed(2)) : '0.00'}</p>
-                            </div>
+                            {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Late Booking Surcharge Applied: +50%</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}
+                            {discount > 0 && (
+                                <div className="mt-3 bg-green-50 p-3 rounded border border-green-100 relative overflow-hidden">
+                                    <div className="relative z-10"><p className="text-green-800 font-bold text-sm flex items-center"><CheckCircle className="w-4 h-4 mr-1" /> REWARD APPLIED</p><p className="text-xs text-green-700 mt-0.5">-${discount.toFixed(2)}</p></div>
+                                </div>
+                            )}
+                            {/* Adjusted Final Total display to complement the top calculator display */}
+                            {(isLate || discount > 0) && (
+                                <div className="pt-2 border-t border-gray-200 flex justify-between items-center">
+                                    <span className="text-sm font-bold text-gray-700">Final Adjusted Total:</span>
+                                    <span className="text-xl font-extrabold text-blue-900">${total.toFixed(2)}</span>
+                                </div>
+                            )}
                             <div className="px-3 py-2 bg-blue-50 rounded border border-blue-100 flex items-start">
                                 <Info className="w-4 h-4 text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
                                 <p className="text-xs text-blue-800">
                                     <strong>Note:</strong> This is an initial offer. The Owner may accept or reject based on availability. 
-                                    If rejected, you will have <strong>one chance</strong> to negotiate a new price or time.
                                 </p>
                             </div>
-                            {isLate && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100"><p className="font-bold">Price before discount: ${subtotal.toFixed(2)} (+50% Surcharge)</p><label className="flex items-center mt-1"><input type="checkbox" required checked={formData.acceptSurcharge} onChange={e => setFormData({...formData, acceptSurcharge: e.target.checked})} className="mr-2" /> I accept</label></div>}
-                            {discount > 0 ? (
-                                <div className="mt-3 bg-green-50 p-3 rounded border border-green-100 relative overflow-hidden">
-                                    <div className="relative z-10"><p className="text-green-800 font-bold text-sm flex items-center"><CheckCircle className="w-4 h-4 mr-1" /> REWARD APPLIED</p><p className="text-xs text-green-700 mt-0.5">-${discount.toFixed(2)} (Max capped at $160)</p><div className="mt-2 pt-2 border-t border-green-200"><p className="text-xs text-green-700 uppercase font-bold">Total to Pay</p><p className="text-2xl font-extrabold text-green-800">${total.toFixed(2)}</p></div></div>
-                                    {subtotal < 160 && <p className="mt-2 text-[10px] text-green-800 italic opacity-80">Note: Delivery cost is under $160. Remaining reward value is not carried over.</p>}
-                                </div>
-                            ) : (<p className="text-sm text-gray-500 font-bold mt-2 text-right">Total: ${total.toFixed(2)}</p>)}
                         </div>
                     ) : (
                         <div className="bg-red-100 border border-red-200 rounded-lg p-4 text-center animate-pulse"><AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" /><p className="text-red-800 font-bold text-sm">Cannot Complete Request</p><p className="text-red-600 text-xs mt-1">{timeStatus.error}</p></div>
