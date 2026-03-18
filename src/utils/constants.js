@@ -1,7 +1,7 @@
 // src/utils/constants.js
 
-// Reward Value matches the price of a standard 50-75km (<1t) delivery
-export const REWARD_VALUE = 160; 
+// Reward Value matches the price of a standard 50km (< 1.25t) delivery
+export const REWARD_VALUE = 185; 
 
 // Default stamp max (fallback for new users before tier calc)
 export const STAMP_MAX = 10;
