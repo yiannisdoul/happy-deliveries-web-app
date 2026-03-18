@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
     CheckCircle, XCircle, Calendar, AlertCircle, User, PenTool, 
-    X, Package, Star, Clock, Truck, Scale, AlertTriangle
+    X, Package, Star, Clock, Truck, Scale, AlertTriangle, FileText
 } from 'lucide-react'; 
 
 const getStatusBadge = (status) => {
@@ -120,10 +120,20 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                     )}
 
                     {job.purchaseOrder && <div className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded inline-block"><strong>PO:</strong> {job.purchaseOrder}</div>}
-                    {job.notes && <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 italic border border-gray-100">"{job.notes}"</div>}
+                    
+                    {/* THE RECEIPT LINK */}
+                    {job.receiptUrl && (
+                        <div className="block mt-2">
+                            <a href={job.receiptUrl} target="_blank" rel="noreferrer" className="text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded inline-flex items-center font-bold border border-indigo-200 transition">
+                                <FileText className="h-3 w-3 mr-1"/> View Receipt / Document
+                            </a>
+                        </div>
+                    )}
+
+                    {job.notes && <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 italic border border-gray-100 mt-2">Instructions: "{job.notes}"</div>}
                     
                     {job.status === 'rejected' && job.rejectionDetails && (
-                        <div className="bg-red-50 border border-red-100 p-3 rounded text-sm">
+                        <div className="bg-red-50 border border-red-100 p-3 rounded text-sm mt-3">
                             <p className="text-red-800 font-bold mb-1">Rejection Reason:</p>
                             <p className="text-gray-700">{job.rejectionDetails.reason}</p>
                             {job.rejectionDetails.note && <p className="text-gray-600 italic mt-1">"{job.rejectionDetails.note}"</p>}
@@ -133,7 +143,8 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                     {job.rewardUsed && <div className="mt-3 bg-green-50 text-green-800 text-xs px-2 py-1 rounded inline-block font-bold flex items-center"><Star className="h-3 w-3 mr-1 fill-green-800 text-green-800"/> REWARD CLAIMED</div>}
                 </div>
                 
-                {job.status === 'accepted' && job.date && (
+                {/* MODIFIED: SHOW CALENDAR ON PENDING AND ACCEPTED */}
+                {(job.status === 'accepted' || job.status === 'pending') && job.date && (
                     <div className="mt-4 pt-4 border-t border-gray-100">
                         <a href={createGoogleCalendarLink(job, clientInfo)} target="_blank" rel="noreferrer" className="block w-full text-center py-3 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-bold text-sm transition-colors flex items-center justify-center">
                             <Calendar className="h-4 w-4 mr-2"/> Add to Google Calendar

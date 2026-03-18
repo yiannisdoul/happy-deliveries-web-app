@@ -43,9 +43,16 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                     )}
 
                     <p className="text-xs text-gray-500 flex items-center"><FileText className="h-3 w-3 mr-1"/> PO: <span className="font-medium ml-1">{job.purchaseOrder || 'N/A'}</span></p>
-                    <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block"><p className="text-xs text-gray-600">Item: <span className="italic">{job.notes}</span></p></div>
                     
-                    {/* NEW: Cancellation Fee Display */}
+                    {/* NEW: Display Receipt Link and Optional Notes */}
+                    {job.receiptUrl && (
+                        <a href={job.receiptUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded inline-flex items-center font-bold border border-indigo-200 transition">
+                            <FileText className="h-3 w-3 mr-1"/> View Receipt
+                        </a>
+                    )}
+                    
+                    {job.notes && <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block"><p className="text-xs text-gray-600">Instructions: <span className="italic">{job.notes}</span></p></div>}
+                    
                     {job.status === 'cancelled' && job.isLateCancel && (
                         <div className="mt-3 bg-red-50 border border-red-200 text-red-800 text-xs px-3 py-2 rounded inline-block font-bold">
                             <AlertTriangle className="h-3 w-3 inline mr-1 mb-0.5"/> 
@@ -101,7 +108,6 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                             )
                         )}
                         
-                        {/* NEW: Cancel Button */}
                         {canCancel && (
                             <button 
                                 onClick={() => handleCancelJob(job)} 

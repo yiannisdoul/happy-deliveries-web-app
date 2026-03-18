@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info, Calendar as CalendarIcon, X, ChevronRight } from 'lucide-react';
+import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info, Calendar as CalendarIcon, X, ChevronRight, UploadCloud } from 'lucide-react';
 import DeliveryCalculator from './DeliveryCalculator'; 
 import { checkSlotStatus } from '../../utils/timeBlocking'; 
 
@@ -72,7 +72,8 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
 export default function RequestForm({ 
     formData, setFormData, handleSubmit, handlePhoneInput, 
     timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote,
-    busyIntervals = [], jobProfile, cancelEdit // NEW: Received cancelEdit prop
+    busyIntervals = [], jobProfile, cancelEdit,
+    receiptFile, handleReceiptChange 
 }) {
     const [showTimePicker, setShowTimePicker] = useState(false);
 
@@ -97,7 +98,6 @@ export default function RequestForm({
 
     return (
         <>
-            {/* NEW: Added Cancel Edit header button */}
             <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold text-blue-900 flex items-center">
                     <FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}
@@ -181,6 +181,28 @@ export default function RequestForm({
                         </label>
                     </div>
                 </div>
+
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 space-y-2">
+                    <p className="text-xs font-bold text-blue-800 uppercase flex items-center">
+                        Attach Receipt / PO <span className="text-red-500 ml-1">*</span>
+                    </p>
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-blue-300 border-dashed rounded-lg cursor-pointer bg-white hover:bg-gray-50 transition">
+                        <div className="flex flex-col items-center justify-center pt-3 pb-4">
+                            <UploadCloud className="w-6 h-6 mb-2 text-blue-400" />
+                            <p className="text-xs text-gray-500 text-center px-4">
+                                {receiptFile ? <span className="font-bold text-blue-600">{receiptFile.name}</span> : <><span className="font-semibold text-blue-600">Click to upload document</span> (PDF or Image)</>}
+                            </p>
+                        </div>
+                        {/* No native required tag here, ClientDash JS handles it! */}
+                        <input type="file" className="hidden" accept="image/*,.pdf" onChange={handleReceiptChange} />
+                    </label>
+                    {formData.receiptUrl && !receiptFile && <p className="text-[10px] text-green-600 font-bold mt-1">✓ Receipt currently attached</p>}
+                </div>
+
+                <div>
+                    <label className="text-xs text-gray-500 font-bold mb-1 block">Additional Instructions <span className="font-normal lowercase">(optional - e.g. gate codes)</span></label>
+                    <textarea className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+                </div>
                 
                 {isQuote ? (
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow-sm animate-pulse">
@@ -220,9 +242,6 @@ export default function RequestForm({
                     )
                 )}
                 
-                <div><label className="text-xs text-gray-500 font-bold mb-1 block">Notes <span className="font-normal lowercase">(what is being delivered?)</span></label><textarea required className="w-full border rounded p-2 text-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} /></div>
-                
-                {/* NEW: Split buttons for cancelling vs updating */}
                 {editingId ? (
                     <div className="flex gap-3">
                         <button type="button" onClick={cancelEdit} disabled={loading} className="w-1/3 py-3 rounded text-gray-700 bg-gray-200 hover:bg-gray-300 font-bold shadow-sm text-sm transition-all">
