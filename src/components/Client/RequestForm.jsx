@@ -72,7 +72,7 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
 export default function RequestForm({ 
     formData, setFormData, handleSubmit, handlePhoneInput, 
     timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote,
-    busyIntervals = [], jobProfile 
+    busyIntervals = [], jobProfile, cancelEdit // NEW: Received cancelEdit prop
 }) {
     const [showTimePicker, setShowTimePicker] = useState(false);
 
@@ -97,7 +97,17 @@ export default function RequestForm({
 
     return (
         <>
-            <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
+            {/* NEW: Added Cancel Edit header button */}
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-blue-900 flex items-center">
+                    <FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}
+                </h3>
+                {editingId && (
+                    <button type="button" onClick={cancelEdit} className="text-xs font-bold text-gray-500 hover:text-red-600 bg-gray-100 hover:bg-red-50 px-3 py-1.5 rounded flex items-center transition-colors">
+                        <X className="h-3 w-3 mr-1"/> Cancel Edit
+                    </button>
+                )}
+            </div>
 
             {busyIntervals.length > 0 && (
                 <div className="bg-orange-50 border-l-4 border-orange-400 p-2 mb-4 rounded-r text-xs text-orange-800 flex items-center animate-in fade-in slide-in-from-top-2">
@@ -212,9 +222,21 @@ export default function RequestForm({
                 
                 <div><label className="text-xs text-gray-500 font-bold mb-1 block">Notes <span className="font-normal lowercase">(what is being delivered?)</span></label><textarea required className="w-full border rounded p-2 text-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} /></div>
                 
-                <button type="submit" disabled={loading || !timeStatus.isValid || isQuote} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${(loading || !timeStatus.isValid || isQuote) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                    {loading ? 'Processing...' : (isQuote ? 'Call to Book' : (editingId ? 'Update Request' : 'Submit Request'))}
-                </button>
+                {/* NEW: Split buttons for cancelling vs updating */}
+                {editingId ? (
+                    <div className="flex gap-3">
+                        <button type="button" onClick={cancelEdit} disabled={loading} className="w-1/3 py-3 rounded text-gray-700 bg-gray-200 hover:bg-gray-300 font-bold shadow-sm text-sm transition-all">
+                            Cancel
+                        </button>
+                        <button type="submit" disabled={loading || !timeStatus.isValid || isQuote} className={`w-2/3 py-3 rounded text-white font-bold shadow-md text-sm transition-all ${(loading || !timeStatus.isValid || isQuote) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                            {loading ? 'Processing...' : (isQuote ? 'Call to Book' : 'Update Request')}
+                        </button>
+                    </div>
+                ) : (
+                    <button type="submit" disabled={loading || !timeStatus.isValid || isQuote} className={`w-full py-3 rounded text-white font-bold shadow-md text-sm transition-all ${(loading || !timeStatus.isValid || isQuote) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                        {loading ? 'Processing...' : (isQuote ? 'Call to Book' : 'Submit Request')}
+                    </button>
+                )}
             </form>
         </>
     );

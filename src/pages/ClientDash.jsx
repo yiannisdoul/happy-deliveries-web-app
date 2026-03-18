@@ -197,12 +197,29 @@ export default function ClientDash() {
             weightBracket: job.weightBracket || 1, actualWeightLabel: job.weightLabel || '< 1.25', actualDistance: job.actualDistance || 50, 
             flights: job.flights || 0, difficultAccess: job.difficultAccess || false,
             calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0
-        }); window.scrollTo({ top: 0, behavior: 'smooth' });
+        }); 
+        
+        setTimeout(() => {
+            const formElement = document.getElementById('request-form-target');
+            if (formElement) {
+                const yOffset = -80; 
+                const y = formElement.getBoundingClientRect().top + window.pageYOffset + yOffset;
+                window.scrollTo({ top: y, behavior: 'smooth' });
+            }
+        }, 100);
     };
 
-    // NEW: Central Cancellation Logic
+    // NEW: Function to instantly cancel edit mode and reset the form
+    const cancelEdit = () => {
+        setEditingId(null);
+        setFormData({ 
+            pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '', notes: '', paymentMethod: 'cash', 
+            date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
+            weightBracket: 1, actualWeightLabel: '< 1.25', actualDistance: 50, flights: 0, difficultAccess: false, calculatedBasePrice: 0, requiredTrips: 1, isQuoteRequired: false, accessCost: 0
+        });
+    };
+
     const handleCancelJob = async (job) => {
-        // 1. Calculate the exact Date/Time of their Arrival Deadline
         let hour24 = parseInt(job.hour);
         if (job.ampm === 'PM' && hour24 !== 12) hour24 += 12;
         if (job.ampm === 'AM' && hour24 === 12) hour24 = 0;
@@ -211,7 +228,6 @@ export default function ClientDash() {
         const arrivalTime = new Date(year, month - 1, day, hour24, parseInt(job.minute));
         const now = new Date();
 
-        // 2. Fetch their specific Pre-Arrival limit
         let bracketToUse = job.weightBracket;
         if (!bracketToUse && job.actualWeight) {
             if (job.actualWeight <= 1.25) bracketToUse = 1;
@@ -230,7 +246,6 @@ export default function ClientDash() {
         let isLateCancel = false;
         let feeAmount = 0;
 
-        // 3. Determine if the driver is theoretically already prepping/driving
         if (profile) {
             const prepStartTime = new Date(arrivalTime.getTime() - (profile.preArrivalMins * 60000));
             if (now >= prepStartTime) {
@@ -239,7 +254,6 @@ export default function ClientDash() {
             }
         }
 
-        // 4. Client Confirmation
         let confirmMsg = "Are you sure you want to cancel this request?";
         if (isLateCancel) {
             confirmMsg = `WARNING: Because you are cancelling after the driver's dispatch/prep time has begun, a 25% late cancellation fee ($${feeAmount.toFixed(2)}) will apply. Do you wish to proceed?`;
@@ -257,13 +271,11 @@ export default function ClientDash() {
             
             await updateDoc(doc(db, "requests", job.id), updates);
             
-            // Refund loyalty reward if used
             if (job.rewardUsed) {
                 const userRef = doc(db, "users", auth.currentUser.uid);
                 await updateDoc(userRef, { rewardCount: rewardCount + 1 });
             }
 
-            // Email Owner Alert
             sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { 
                 to_name: "Owner", 
                 to_email: COMPANY_EMAIL, 
@@ -362,29 +374,34 @@ export default function ClientDash() {
             <ProofViewModal viewProofJob={viewProofJob} setViewProofJob={setViewProofJob} />
             <CounterOfferModal counteringJob={counteringJob} setCounteringJob={setCounteringJob} handleSubmitCounterModal={handleSubmitCounterModal} counterNote={counterNote} setCounterNote={setCounterNote} counterPrice={counterPrice} setCounterPrice={setCounterPrice} counterDate={counterDate} setCounterDate={setCounterDate} counterHour={counterHour} setCounterHour={counterHour} counterMinute={counterMinute} setCounterMinute={setCounterMinute} counterAmpm={counterAmpm} setCounterAmpm={setCounterAmpm} />
 
-            <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
-                <div className="md:col-span-1 order-1">
-                    <div className="space-y-4">
-                        <div id="gamification-bar-target" className="relative">
-                            <GamificationBar monthlyDeliveryCount={monthlyCount} />
-                            <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/tier-program')}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg><div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">View details on tiers, floors, and rollover protection.</div></div>
-                        </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div id="gamification-bar-target" className="relative bg-white shadow-sm rounded-xl p-5 border border-gray-100">
+                    <GamificationBar monthlyDeliveryCount={monthlyCount} />
+                    <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/tier-program')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-blue-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
+                        <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">View details on tiers, floors, and rollover protection.</div>
+                    </div>
+                </div>
 
-                        <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative"> 
-                            <div id="loyalty-card-target" className="relative">
-                                <LoyaltyCard stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob} setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} />
-                                <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/loyalty-program')}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg><div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">Details on stamp earning, rewards, and how tiers affect your goal.</div></div>
-                            </div>
-                            
-                            <div id="request-form-target">
-                                <RequestForm 
-                                    formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput} 
-                                    timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount} 
-                                    editingId={editingId} loading={loading} isQuote={isQuote} busyIntervals={busyIntervals} 
-                                    jobProfile={currentJobProfile} 
-                                />
-                            </div>
-                        </div>
+                <div id="loyalty-card-target" className="relative bg-white shadow-sm rounded-xl p-5 border border-gray-100">
+                    <LoyaltyCard stamps={stamps} rewardCount={rewardCount} useRewardOnThisJob={useRewardOnThisJob} setUseRewardOnThisJob={setUseRewardOnThisJob} monthlyDeliveryCount={monthlyCount} />
+                    <div className="absolute top-2 right-2 z-10 group cursor-pointer" onClick={() => navigate('/loyalty-program')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle text-gray-900 hover:text-yellow-700 transition-colors"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
+                        <div className="absolute right-0 top-6 hidden group-hover:block w-48 bg-gray-800 text-white text-xs p-2 rounded-lg shadow-lg z-20">Details on stamp earning, rewards, and how tiers affect your goal.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex flex-col md:grid md:grid-cols-3 md:gap-8 gap-8">
+                
+                <div className="md:col-span-1 order-1">
+                    <div className="bg-white shadow-lg rounded-xl p-5 border border-gray-100 relative" id="request-form-target"> 
+                        <RequestForm 
+                            formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput} 
+                            timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount} 
+                            editingId={editingId} loading={loading} isQuote={isQuote} busyIntervals={busyIntervals} 
+                            jobProfile={currentJobProfile} cancelEdit={cancelEdit} 
+                        />
                     </div>
                 </div>
 
