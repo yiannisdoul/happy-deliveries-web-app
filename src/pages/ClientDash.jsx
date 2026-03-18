@@ -85,7 +85,7 @@ export default function ClientDash() {
             const intervals = [];
             snapshot.docs.forEach(doc => {
                 const job = doc.data();
-                if (job.status === 'rejected' || doc.id === editingId) return;
+                if (job.status === 'rejected' || job.status === 'cancelled' || doc.id === editingId) return;
                 
                 const arrivalMins = getMinutesFromMidnight(job.hour, job.minute, job.ampm);
                 
@@ -199,6 +199,89 @@ export default function ClientDash() {
             calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0
         }); window.scrollTo({ top: 0, behavior: 'smooth' });
     };
+
+    // NEW: Central Cancellation Logic
+    const handleCancelJob = async (job) => {
+        // 1. Calculate the exact Date/Time of their Arrival Deadline
+        let hour24 = parseInt(job.hour);
+        if (job.ampm === 'PM' && hour24 !== 12) hour24 += 12;
+        if (job.ampm === 'AM' && hour24 === 12) hour24 = 0;
+        const [year, month, day] = job.date.split('-').map(Number);
+        
+        const arrivalTime = new Date(year, month - 1, day, hour24, parseInt(job.minute));
+        const now = new Date();
+
+        // 2. Fetch their specific Pre-Arrival limit
+        let bracketToUse = job.weightBracket;
+        if (!bracketToUse && job.actualWeight) {
+            if (job.actualWeight <= 1.25) bracketToUse = 1;
+            else if (job.actualWeight <= 2.5) bracketToUse = 2;
+            else if (job.actualWeight <= 3.75) bracketToUse = 3;
+            else bracketToUse = 4;
+        }
+
+        const profile = getJobProfile(
+            bracketToUse || 1, 
+            job.actualDistance || 50, 
+            job.flights || 0, 
+            job.difficultAccess || false
+        );
+
+        let isLateCancel = false;
+        let feeAmount = 0;
+
+        // 3. Determine if the driver is theoretically already prepping/driving
+        if (profile) {
+            const prepStartTime = new Date(arrivalTime.getTime() - (profile.preArrivalMins * 60000));
+            if (now >= prepStartTime) {
+                isLateCancel = true;
+                feeAmount = (job.totalAmount || job.amount) * 0.25;
+            }
+        }
+
+        // 4. Client Confirmation
+        let confirmMsg = "Are you sure you want to cancel this request?";
+        if (isLateCancel) {
+            confirmMsg = `WARNING: Because you are cancelling after the driver's dispatch/prep time has begun, a 25% late cancellation fee ($${feeAmount.toFixed(2)}) will apply. Do you wish to proceed?`;
+        }
+
+        if (!window.confirm(confirmMsg)) return;
+
+        try {
+            const updates = { 
+                status: 'cancelled', 
+                cancelledAt: serverTimestamp(),
+                isLateCancel,
+                cancellationFee: isLateCancel ? feeAmount : 0
+            };
+            
+            await updateDoc(doc(db, "requests", job.id), updates);
+            
+            // Refund loyalty reward if used
+            if (job.rewardUsed) {
+                const userRef = doc(db, "users", auth.currentUser.uid);
+                await updateDoc(userRef, { rewardCount: rewardCount + 1 });
+            }
+
+            // Email Owner Alert
+            sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { 
+                to_name: "Owner", 
+                to_email: COMPANY_EMAIL, 
+                subject: "Request Cancelled by Client", 
+                message: `Client ${auth.currentUser.email} has cancelled their job from ${job.from} to ${job.to}. ${isLateCancel ? 'A 25% late fee applies.' : 'No fee applies.'}`, 
+                status: "Cancelled", 
+                total_price: isLateCancel ? `$${feeAmount.toFixed(2)} (Fee)` : `$0.00`, 
+                client_email: auth.currentUser.email, 
+                job_time: `${job.date} @ ${job.hour}:${job.minute} ${job.ampm}`, 
+                link: "https://dashboard.happydeliveries.com.au/owner" 
+            });
+            
+            alert(isLateCancel ? `Job Cancelled. A 25% fee ($${feeAmount.toFixed(2)}) has been applied.` : "Job successfully cancelled.");
+        } catch (error) {
+            console.error(error);
+            alert("Failed to cancel job.");
+        }
+    };
     
     const openCounterModal = (job) => { 
         setCounteringJob(job); setCounterNote(job.rejectionDetails?.note || ''); setCounterPrice(job.rejectionDetails?.counterPrice || job.amount); 
@@ -309,7 +392,7 @@ export default function ClientDash() {
                     <div className="flex flex-col sm:flex-row justify-between items-center mb-2">
                         <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
                         <div className="flex flex-wrap justify-center sm:justify-end bg-gray-100 p-1 rounded-lg space-x-1" id="jobs-filter-target">
-                            {['all', 'pending', 'accepted', 'delivered', 'rejected'].map(status => (
+                            {['all', 'pending', 'accepted', 'delivered', 'rejected', 'cancelled'].map(status => (
                                 <button key={status} onClick={() => setFilter(status)} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
                             ))}
                         </div>
@@ -319,7 +402,7 @@ export default function ClientDash() {
 
                     <div className="space-y-4">
                         {filteredJobs.map((job) => (
-                            <ClientJobCard key={job.id} job={job} openCounterModal={openCounterModal} handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob} handleEdit={handleEdit} />
+                            <ClientJobCard key={job.id} job={job} openCounterModal={openCounterModal} handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob} handleEdit={handleEdit} handleCancelJob={handleCancelJob} />
                         ))}
                     </div>
                 </div>

@@ -9,14 +9,16 @@ const getStatusBadge = (status) => {
       case 'accepted': return <span className="flex items-center bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><CheckCircle className="h-4 w-4 mr-1"/> Accepted</span>;
       case 'rejected': return <span className="flex items-center bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><XCircle className="h-4 w-4 mr-1"/> Rejected</span>;
       case 'delivered': return <span className="flex items-center bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><Package className="h-4 w-4 mr-1"/> Delivered</span>;
+      case 'cancelled': return <span className="flex items-center bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full uppercase"><XCircle className="h-4 w-4 mr-1"/> Cancelled</span>;
       default: return <span className="flex items-center bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full uppercase"><Clock className="h-4 w-4 mr-1"/> Pending</span>;
     }
 };
 
-export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit }) {
+export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit, handleCancelJob }) {
     
     const canEdit = job.status === 'pending';
     const canCounter = job.status === 'rejected' && !job.hasClientCountered;
+    const canCancel = job.status === 'pending' || job.status === 'accepted';
 
     return (
         <div key={job.id} className="bg-white shadow-sm rounded-lg p-5 border border-gray-100 relative hover:shadow-md transition-shadow">
@@ -29,7 +31,6 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                     <p className="text-sm text-gray-600 flex items-center"><MapPin className="h-3 w-3 mr-1 text-blue-400"/> <span className="font-semibold text-gray-700 w-12">From:</span> {job.from}</p>
                     <p className="text-sm text-gray-600 flex items-center"><MapPin className="h-3 w-3 mr-1 text-orange-400"/> <span className="font-semibold text-gray-700 w-12">To:</span> {job.to}</p>
                     
-                    {/* NEW: Display Distance & Weight */}
                     {job.distanceLabel && job.weightLabel && (
                         <div className="flex gap-2 my-2">
                             <span className="text-xs bg-blue-50 text-blue-800 px-2 py-1 rounded border border-blue-100 flex items-center">
@@ -44,6 +45,14 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                     <p className="text-xs text-gray-500 flex items-center"><FileText className="h-3 w-3 mr-1"/> PO: <span className="font-medium ml-1">{job.purchaseOrder || 'N/A'}</span></p>
                     <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block"><p className="text-xs text-gray-600">Item: <span className="italic">{job.notes}</span></p></div>
                     
+                    {/* NEW: Cancellation Fee Display */}
+                    {job.status === 'cancelled' && job.isLateCancel && (
+                        <div className="mt-3 bg-red-50 border border-red-200 text-red-800 text-xs px-3 py-2 rounded inline-block font-bold">
+                            <AlertTriangle className="h-3 w-3 inline mr-1 mb-0.5"/> 
+                            25% LATE CANCELLATION FEE APPLIED: ${job.cancellationFee?.toFixed(2)}
+                        </div>
+                    )}
+
                     {job.status === 'rejected' && job.rejectionDetails && (
                         <div className="mt-3 bg-red-50 border-l-4 border-red-400 p-3 rounded text-sm text-gray-700">
                             <p className="font-bold text-red-800 mb-1 flex items-center"><AlertTriangle className="h-4 w-4 mr-1"/> Request Rejected</p>
@@ -73,23 +82,36 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                     {job.rewardUsed && <div className="mt-3 bg-yellow-50 text-yellow-800 text-xs px-2 py-1 rounded inline-block font-bold">LOYALTY REWARD CLAIMED</div>}
                 </div>
                 
-                <div className="text-right">
-                    <p className="font-bold text-2xl text-blue-600">${job.totalAmount || job.amount}</p>
+                <div className="text-right flex flex-col items-end">
+                    <p className={`font-bold text-2xl ${job.status === 'cancelled' ? 'text-gray-400 line-through' : 'text-blue-600'}`}>${job.totalAmount || job.amount}</p>
                     <p className="text-xs text-gray-400 capitalize mb-2">{job.paymentMethod}</p>
                     
-                    {job.status === 'delivered' ? (
-                        <button onClick={() => setViewProofJob(job)} className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-200 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors"><Package className="h-3 w-3 mr-1"/> View Proof</button>
-                    ) : (
-                        canEdit && (
+                    <div className="flex gap-2 mt-2">
+                        {job.status === 'delivered' ? (
+                            <button onClick={() => setViewProofJob(job)} className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-200 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors"><Package className="h-3 w-3 mr-1"/> View Proof</button>
+                        ) : (
+                            canEdit && (
+                                <button 
+                                    onClick={() => handleEdit(job)} 
+                                    className={`text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors hover:bg-blue-100`}
+                                    title="Edit request"
+                                >
+                                    <Edit2 className="h-3 w-3 mr-1"/> Edit
+                                </button>
+                            )
+                        )}
+                        
+                        {/* NEW: Cancel Button */}
+                        {canCancel && (
                             <button 
-                                onClick={() => handleEdit(job)} 
-                                className={`text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors hover:bg-blue-100`}
-                                title="Edit request"
+                                onClick={() => handleCancelJob(job)} 
+                                className={`text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-full font-bold flex items-center transition-colors hover:bg-red-100`}
+                                title="Cancel request"
                             >
-                                <Edit2 className="h-3 w-3 mr-1"/> Edit
+                                <XCircle className="h-3 w-3 mr-1"/> Cancel
                             </button>
-                        )
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
