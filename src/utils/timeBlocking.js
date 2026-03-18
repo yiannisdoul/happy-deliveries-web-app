@@ -1,40 +1,53 @@
-// --- CONFIGURATION ---
-const SPEED_KMH = 40; 
-const MANDATORY_BUFFER = 30; // Minutes between jobs for travel/rest
-
 /**
- * Calculates the total duration (in minutes) a job occupies.
+ * Dynamically calculates transit speed based on distance
  */
-export const calculateJobDuration = (weightBracket, distance, flights = 0, difficultAccess = false) => {
-    // 1. Labor Time & Trips
-    let laborMins = 0;
-    let trips = 1;
-
-    if (weightBracket === 1) { 
-        laborMins = 60; trips = 1; 
-    } else if (weightBracket === 2) { 
-        laborMins = 120; trips = 2; 
-    } else if (weightBracket === 3) { 
-        laborMins = 180; trips = 3; 
-    } else { 
-        return 0; // Special Quote (No time block)
-    }
-
-    // 2. Transit Time (Distance / 40km/h * 2 legs per trip)
-    const hoursPerLeg = distance / SPEED_KMH;
-    const totalLegs = trips * 2;
-    const transitMins = Math.round(hoursPerLeg * 60 * totalLegs);
-
-    // 3. Complexity Buffers
-    const stairsMins = 15 * flights * trips;
-    const accessMins = difficultAccess ? 30 : 0;
-
-    // 4. Total Job Duration + Mandatory Buffer
-    return laborMins + transitMins + stairsMins + accessMins + MANDATORY_BUFFER;
+const getTransitMins = (distance) => {
+    let speed = 40; // Inner city / Short trips
+    if (distance > 25 && distance <= 75) speed = 60; // Arterial roads
+    else if (distance > 75) speed = 80; // Highway / Long haul
+    
+    return Math.round((distance / speed) * 60);
 };
 
 /**
- * Converts "10" "30" "AM" to minutes from midnight (e.g. 630)
+ * Calculates the exact ROUND-TRIP breakdown of a job relative to the Arrival Deadline.
+ */
+export const getJobProfile = (weightBracket, distance, flights = 0, difficultAccess = false) => {
+    let trips = 1;
+    if (weightBracket === 1) trips = 1;
+    else if (weightBracket === 2) trips = 2;
+    else if (weightBracket === 3) trips = 3;
+    else return null; // Special Quote
+
+    const transitMins = getTransitMins(distance);
+    const stairMinsPerTrip = 15 * flights;
+    const diffAccessMins = difficultAccess ? 30 : 0; 
+
+    // 1. BACKWARD CALCULATION (Pre-Arrival Block - The Outbound Leg)
+    // Base Prep (30m) + Stairs + Difficult Access + Drive Out (transitMins)
+    const preArrivalMins = 30 + stairMinsPerTrip + diffAccessMins + transitMins;
+
+    // 2. FORWARD CALCULATION (Post-Arrival Completion - The Return Leg)
+    // Unload (20m) + Drive Back (transitMins) + Return Buffer/Delay (30m)
+    let postArrivalMins = 20 + transitMins + 30;
+
+    // Additional Trips (Load -> Drive Out -> Unload -> Drive Back -> Return Buffer)
+    const remainingTrips = trips - 1;
+    if (remainingTrips > 0) {
+        const singleCycleMins = 30 + stairMinsPerTrip + transitMins + 20 + transitMins + 30;
+        postArrivalMins += (remainingTrips * singleCycleMins);
+    }
+
+    return {
+        preArrivalMins,
+        postArrivalMins,
+        totalDuration: preArrivalMins + postArrivalMins,
+        trips
+    };
+};
+
+/**
+ * Converts "10" "30" "AM" to minutes from midnight
  */
 export const getMinutesFromMidnight = (hour, minute, ampm) => {
     let h = parseInt(hour);
@@ -44,18 +57,22 @@ export const getMinutesFromMidnight = (hour, minute, ampm) => {
 };
 
 /**
- * Checks if a specific time slot OR its duration overlaps with any busy interval.
+ * Validates a slot strictly against overlaps with existing bookings.
  */
-export const isSlotBlocked = (checkMinutes, proposedDuration, busyIntervals) => {
-    // If the job is a quote, we don't know the duration, so block nothing by default 
-    if (proposedDuration === 0) return false; 
+export const checkSlotStatus = (arrivalTimeMins, jobProfile, busyIntervals) => {
+    if (!jobProfile) return { isBlocked: false, reason: 'available' }; 
 
-    const proposedEnd = checkMinutes + proposedDuration;
+    const startTime = arrivalTimeMins - jobProfile.preArrivalMins;
+    const endTime = arrivalTimeMins + jobProfile.postArrivalMins;
 
-    return busyIntervals.some(interval => {
-        // OVERLAP LOGIC: A new job overlaps an existing job IF:
-        // Its start time is BEFORE the existing job ends AND
-        // Its end time is AFTER the existing job starts.
-        return checkMinutes < interval.end && proposedEnd > interval.start;
+    // Overlap Validation Only
+    const hasOverlap = busyIntervals.some(interval => {
+        return startTime < interval.end && endTime > interval.start;
     });
+
+    if (hasOverlap) {
+        return { isBlocked: true, reason: 'overlap' };
+    }
+
+    return { isBlocked: false, reason: 'available' };
 };

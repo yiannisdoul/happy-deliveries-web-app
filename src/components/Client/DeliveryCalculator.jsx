@@ -56,11 +56,10 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
   
   const totalCost = isQuote ? 0 : baseFee + totalDistCost + accessTotal;
 
-  // NEW: Exposed new fields for Time Blocking
   const currentCalcs = {
-    weightBracket, // Added
-    flights: flightsNum, // Added
-    difficultAccess, // Added
+    weightBracket,
+    flights: flightsNum,
+    difficultAccess,
     weight: weightLabel, 
     distance: distNum, 
     trips,
@@ -131,7 +130,7 @@ const DeliveryCalculator = ({ onUpdate, initialDistance = 50 }) => {
       </div>
 
       <div>
-        <label className="text-xs font-bold text-blue-800 uppercase block mb-3">Access Surcharges</label>
+        <label className="text-xs font-bold text-blue-800 uppercase block mb-3">Job Specifics</label>
         
         <div className="space-y-3">
             <div className="flex items-center justify-between p-3 bg-white rounded border border-blue-100 shadow-sm focus-within:border-blue-400 transition-colors">

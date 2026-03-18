@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { FileText, Clock, AlertTriangle, CheckCircle, PhoneCall, Info, Calendar as CalendarIcon, X, ChevronRight } from 'lucide-react';
 import DeliveryCalculator from './DeliveryCalculator'; 
-import { getMinutesFromMidnight, isSlotBlocked } from '../../utils/timeBlocking'; 
+import { checkSlotStatus } from '../../utils/timeBlocking'; 
 
-const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTime, proposedDuration }) => {
+const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTime, jobProfile }) => {
     if (!isOpen) return null;
     const slots = [];
     const startHour = 7;
@@ -17,8 +17,7 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
             const displayMinute = m === 0 ? '00' : '30';
             
             const checkMins = (h * 60) + m; 
-            // NEW: Passing proposedDuration here!
-            const isBlocked = isSlotBlocked(checkMins, proposedDuration, busyIntervals);
+            const status = checkSlotStatus(checkMins, jobProfile, busyIntervals);
             const isSelected = selectedTime.hour === displayHour.toString() && 
                                selectedTime.minute === displayMinute && 
                                selectedTime.ampm === ampm;
@@ -26,7 +25,9 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
             slots.push({
                 hour: displayHour.toString(), minute: displayMinute, ampm: ampm,
                 label: `${displayHour}:${displayMinute} ${ampm}`,
-                isBlocked, isSelected
+                isBlocked: status.isBlocked,
+                reason: status.reason,
+                isSelected
             });
         }
     }
@@ -35,23 +36,32 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                    <h3 className="font-bold text-gray-800 flex items-center"><Clock className="w-5 h-5 mr-2 text-blue-600"/> Select a Time</h3>
+                    <h3 className="font-bold text-gray-800 flex items-center"><Clock className="w-5 h-5 mr-2 text-blue-600"/> Select Arrival Time</h3>
                     <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition"><X className="w-5 h-5 text-gray-500"/></button>
                 </div>
                 <div className="px-4 py-2 flex gap-4 text-xs font-medium text-gray-500 bg-white border-b border-gray-50">
                     <div className="flex items-center"><span className="w-3 h-3 rounded-full border border-gray-300 mr-1.5"></span> Available</div>
-                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-gray-200 mr-1.5"></span> Booked</div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-gray-200 mr-1.5"></span> Blocked</div>
                     <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-blue-600 mr-1.5"></span> Selected</div>
                 </div>
-                <div className="p-4 overflow-y-auto grid grid-cols-2 gap-3">
+                <div className="p-4 overflow-y-visible grid grid-cols-2 gap-3 relative">
                     {slots.map((slot, index) => (
-                        <button
-                            key={index} disabled={slot.isBlocked}
-                            onClick={() => { onSelect(slot.hour, slot.minute, slot.ampm); onClose(); }}
-                            className={`py-3 px-2 rounded-lg text-sm font-bold border transition-all relative ${slot.isBlocked ? 'bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed line-through decoration-gray-400' : slot.isSelected ? 'bg-blue-600 border-blue-600 text-white shadow-md ring-2 ring-blue-200' : 'bg-white border-gray-200 text-gray-700 hover:border-blue-400 hover:text-blue-600 hover:shadow-sm'}`}
-                        >
-                            {slot.label}
-                        </button>
+                        <div key={index} className="relative group w-full">
+                            <button
+                                disabled={slot.isBlocked}
+                                onClick={() => { onSelect(slot.hour, slot.minute, slot.ampm); onClose(); }}
+                                className={`w-full py-3 px-2 rounded-lg text-sm font-bold border transition-all ${slot.isBlocked ? 'bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed line-through decoration-gray-400' : slot.isSelected ? 'bg-blue-600 border-blue-600 text-white shadow-md ring-2 ring-blue-200' : 'bg-white border-gray-200 text-gray-700 hover:border-blue-400 hover:text-blue-600 hover:shadow-sm'}`}
+                            >
+                                {slot.label}
+                            </button>
+                            
+                            {slot.isBlocked && slot.reason === 'overlap' && (
+                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block w-56 bg-gray-800 text-white text-[10px] leading-relaxed p-2.5 rounded-lg shadow-xl z-[100] text-center pointer-events-none">
+                                    This logistics window conflicts with another booked delivery.
+                                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                                </div>
+                            )}
+                        </div>
                     ))}
                 </div>
             </div>
@@ -62,7 +72,7 @@ const TimePickerModal = ({ isOpen, onClose, onSelect, busyIntervals, selectedTim
 export default function RequestForm({ 
     formData, setFormData, handleSubmit, handlePhoneInput, 
     timeStatus, isLate, total, subtotal, discount, editingId, loading, isQuote,
-    busyIntervals = [], proposedDuration 
+    busyIntervals = [], jobProfile 
 }) {
     const [showTimePicker, setShowTimePicker] = useState(false);
 
@@ -88,17 +98,6 @@ export default function RequestForm({
     return (
         <>
             <h3 className="text-xl font-bold mb-4 text-blue-900 flex items-center"><FileText className="h-5 w-5 mr-2" />{editingId ? "Edit Request" : "New Delivery"}</h3>
-            
-            {/* NEW: Warning for jobs estimated to take 5+ hours (300 mins) */}
-            {proposedDuration >= 300 && (
-                <div className="bg-orange-50 border-l-4 border-orange-500 p-3 mb-4 rounded-r shadow-sm flex items-start animate-in fade-in slide-in-from-top-2">
-                    <AlertTriangle className="h-5 w-5 text-orange-600 mr-2 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-orange-800 font-medium">
-                        <strong className="block uppercase tracking-wide mb-0.5">Large Job Notice</strong>
-                        This job is estimated to take {Math.round(proposedDuration / 60)} hours. Please ensure your start time allows for completion before 6:00 PM.
-                    </p>
-                </div>
-            )}
 
             {busyIntervals.length > 0 && (
                 <div className="bg-orange-50 border-l-4 border-orange-400 p-2 mb-4 rounded-r text-xs text-orange-800 flex items-center animate-in fade-in slide-in-from-top-2">
@@ -106,17 +105,6 @@ export default function RequestForm({
                     <span>Some slots are fully booked for this date.</span>
                 </div>
             )}
-
-            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-5 rounded-r shadow-sm">
-                <div className="flex items-start">
-                    <Clock className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
-                    <div className="text-xs text-red-800 font-medium leading-relaxed space-y-1">
-                        <p><span className="font-bold uppercase tracking-wide">Important:</span> We require at least <span className="underline decoration-red-400 font-bold">2 hours notice</span>.</p>
-                        <p>Operating Hours: <span className="font-semibold">7am - 6pm</span>.</p>
-                        <p className="font-bold text-red-700 pt-1">* 50% surcharge applies same-day after 2 PM.</p>
-                    </div>
-                </div>
-            </div>
             
             <form onSubmit={handleSubmit} className="space-y-4">
                 
@@ -145,8 +133,9 @@ export default function RequestForm({
                     initialDistance={formData.actualDistance || 50} 
                 />
 
-                <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold text-gray-500 uppercase mt-1">Date & Time</label>
+                <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-gray-500 uppercase mt-2">Date & Delivery Time</label>
+                    <p className="text-[10px] font-bold text-blue-600 mb-1">Please pick the most appropriate delivery hour.</p>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                             <input type="date" required className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
@@ -156,13 +145,16 @@ export default function RequestForm({
                             <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition"/>
                         </button>
                     </div>
+                    <p className="text-[10px] text-gray-500 font-medium mt-1 leading-tight px-1">
+                        * Selected time is your estimated <strong className="text-gray-700">Arrival/Delivery time</strong>. We will arrive at the pickup location earlier to begin loading.
+                    </p>
                     <TimePickerModal 
                         isOpen={showTimePicker} 
                         onClose={() => setShowTimePicker(false)} 
                         onSelect={handleTimeSelect} 
                         busyIntervals={busyIntervals} 
                         selectedTime={{ hour: formData.hour, minute: formData.minute, ampm: formData.ampm }} 
-                        proposedDuration={proposedDuration} // Passed to modal
+                        jobProfile={jobProfile} 
                     />
                 </div>
                 

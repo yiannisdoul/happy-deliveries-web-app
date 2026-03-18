@@ -5,7 +5,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { REWARD_VALUE, COMPANY_EMAIL } from '../utils/constants';
 import { useNavigate } from 'react-router-dom';
 import { checkAndPerformReset } from '../utils/resetLogic';
-import { calculateJobDuration, getMinutesFromMidnight } from '../utils/timeBlocking'; 
+import { getJobProfile, getMinutesFromMidnight, checkSlotStatus } from '../utils/timeBlocking'; 
 import { sendNotificationEmail, TEMPLATES } from '../utils/emailService';
 import LoyaltyCard from '../components/Client/LoyaltyCard';
 import RequestForm from '../components/Client/RequestForm';
@@ -51,6 +51,13 @@ export default function ClientDash() {
         isQuoteRequired: false, accessCost: 0
     });
 
+    const currentJobProfile = getJobProfile(
+        formData.weightBracket, 
+        formData.actualDistance, 
+        formData.flights, 
+        formData.difficultAccess
+    );
+
     useEffect(() => {
         let unsubscribeSnapshot = () => {};
         const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -71,7 +78,6 @@ export default function ClientDash() {
         }); return () => unsubscribeAuth();
     }, []);
 
-    // Time Blocking Fetching Effect
     useEffect(() => {
         if (!formData.date) return;
         const q = query(collection(db, "requests"), where("date", "==", formData.date));
@@ -81,9 +87,8 @@ export default function ClientDash() {
                 const job = doc.data();
                 if (job.status === 'rejected' || doc.id === editingId) return;
                 
-                const startMins = getMinutesFromMidnight(job.hour, job.minute, job.ampm);
+                const arrivalMins = getMinutesFromMidnight(job.hour, job.minute, job.ampm);
                 
-                // Fallback bracket logic for older/legacy jobs in your database
                 let bracketToUse = job.weightBracket;
                 if (!bracketToUse && job.actualWeight) {
                     if (job.actualWeight <= 1.25) bracketToUse = 1;
@@ -92,18 +97,54 @@ export default function ClientDash() {
                     else bracketToUse = 4;
                 }
 
-                const duration = calculateJobDuration(
+                const profile = getJobProfile(
                     bracketToUse || 1, 
                     job.actualDistance || 50, 
                     job.flights || 0, 
                     job.difficultAccess || false
                 );
                 
-                intervals.push({ start: startMins, end: startMins + duration });
-            }); setBusyIntervals(intervals);
+                if (profile) {
+                    intervals.push({ 
+                        start: arrivalMins - profile.preArrivalMins, 
+                        end: arrivalMins + profile.postArrivalMins 
+                    });
+                }
+            }); 
+            setBusyIntervals(intervals);
         }, (error) => { console.error("Error fetching time slots:", error); });
         return () => unsubscribe();
     }, [formData.date, editingId]); 
+
+    useEffect(() => {
+        let hour24 = parseInt(formData.hour);
+        if (formData.ampm === 'PM' && hour24 !== 12) hour24 += 12;
+        if (formData.ampm === 'AM' && hour24 === 12) hour24 = 0;
+        const currentArrivalMins = (hour24 * 60) + parseInt(formData.minute);
+
+        if (checkSlotStatus(currentArrivalMins, currentJobProfile, busyIntervals).isBlocked) {
+            for (let h = 7; h <= 18; h++) {
+                for (let m = 0; m < 60; m += 30) {
+                    if (h === 18 && m > 0) continue;
+                    const checkArrivalMins = (h * 60) + m;
+                    
+                    if (!checkSlotStatus(checkArrivalMins, currentJobProfile, busyIntervals).isBlocked) {
+                        const ampm = h >= 12 ? 'PM' : 'AM';
+                        const displayHour = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+                        const displayMinute = m === 0 ? '00' : '30';
+                        
+                        setFormData(prev => ({
+                            ...prev, 
+                            hour: displayHour.toString(), 
+                            minute: displayMinute, 
+                            ampm
+                        }));
+                        return; 
+                    }
+                }
+            }
+        }
+    }, [busyIntervals, currentJobProfile, formData.date, formData.hour, formData.minute, formData.ampm]); 
 
     const filteredJobs = jobs.filter(job => { if (filter === 'all') return true; return job.status === filter; });
 
@@ -118,20 +159,19 @@ export default function ClientDash() {
         
         if (diffMs < 0) return { isValid: false, error: "Time cannot be in the past." };
         if (diffHours < 2) return { isValid: false, error: "Too Soon: We require at least 2 hours notice." };
-        if (hour24 >= 18 || hour24 < 7) return { isValid: false, error: "Closed: We operate between 7:00 AM and 6:00 PM." };
+        
+        const currentArrivalMins = (hour24 * 60) + parseInt(formData.minute);
+        const status = checkSlotStatus(currentArrivalMins, currentJobProfile, busyIntervals);
+        
+        if (status.isBlocked) {
+            if (status.reason === 'overlap') return { isValid: false, error: "This slot conflicts with an existing booking's travel or labor time." };
+        }
+
         return { isValid: true, error: null };
     };
 
     const isQuote = formData.isQuoteRequired || false;
     const timeStatus = getTimeValidation();
-    
-    // Calculate the duration of the current configuration
-    const currentProposedDuration = calculateJobDuration(
-        formData.weightBracket, 
-        formData.actualDistance, 
-        formData.flights, 
-        formData.difficultAccess
-    );
     
     const isToday = new Date(formData.date).toDateString() === new Date().toDateString();
     let calculatedHour24 = parseInt(formData.hour);
@@ -211,7 +251,6 @@ export default function ClientDash() {
                 status: 'pending', updatedAt: serverTimestamp(), rewardUsed: useRewardOnThisJob && discount > 0,
             };
             
-            // Cleanup transient states
             delete payload.poType;
             delete payload.actualWeightLabel;
 
@@ -259,7 +298,7 @@ export default function ClientDash() {
                                     formData={formData} setFormData={setFormData} handleSubmit={handleSubmit} handlePhoneInput={handlePhoneInput} 
                                     timeStatus={timeStatus} isLate={isLate} total={total} subtotal={subtotal} discount={discount} 
                                     editingId={editingId} loading={loading} isQuote={isQuote} busyIntervals={busyIntervals} 
-                                    proposedDuration={currentProposedDuration} 
+                                    jobProfile={currentJobProfile} 
                                 />
                             </div>
                         </div>
