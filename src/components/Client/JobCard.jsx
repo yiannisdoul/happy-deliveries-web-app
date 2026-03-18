@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
     MapPin, FileText, CheckCircle, XCircle, Clock, 
-    Edit2, AlertTriangle, Package, Truck, Scale
+    Edit2, AlertTriangle, Package, Truck, Scale, UploadCloud 
 } from 'lucide-react'; 
 
 const getStatusBadge = (status) => {
@@ -14,11 +14,13 @@ const getStatusBadge = (status) => {
     }
 };
 
-export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit, handleCancelJob }) {
+export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit, handleCancelJob, handleUpdateReceipt }) {
     
     const canEdit = job.status === 'pending';
     const canCounter = job.status === 'rejected' && !job.hasClientCountered;
     const canCancel = job.status === 'pending' || job.status === 'accepted';
+    // NEW: Allow document swap if it's pending or accepted
+    const canUpdateDoc = job.status === 'pending' || job.status === 'accepted';
 
     return (
         <div key={job.id} className="bg-white shadow-sm rounded-lg p-5 border border-gray-100 relative hover:shadow-md transition-shadow">
@@ -44,12 +46,29 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
 
                     <p className="text-xs text-gray-500 flex items-center"><FileText className="h-3 w-3 mr-1"/> PO: <span className="font-medium ml-1">{job.purchaseOrder || 'N/A'}</span></p>
                     
-                    {/* NEW: Display Receipt Link and Optional Notes */}
-                    {job.receiptUrl && (
-                        <a href={job.receiptUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded inline-flex items-center font-bold border border-indigo-200 transition">
-                            <FileText className="h-3 w-3 mr-1"/> View Receipt
-                        </a>
-                    )}
+                    <div className="mt-2 flex items-center flex-wrap gap-2">
+                        {job.receiptUrl && (
+                            <a href={job.receiptUrl} target="_blank" rel="noreferrer" className="text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded inline-flex items-center font-bold border border-indigo-200 transition">
+                                <FileText className="h-3 w-3 mr-1"/> View Receipt
+                            </a>
+                        )}
+                        
+                        {/* NEW: Quick Swap Document Button */}
+                        {canUpdateDoc && (
+                            <label className="text-xs bg-gray-50 text-gray-700 hover:bg-gray-200 px-3 py-1.5 rounded inline-flex items-center font-bold border border-gray-200 transition cursor-pointer">
+                                <UploadCloud className="h-3 w-3 mr-1 text-blue-500"/> Update Doc
+                                <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    accept="image/*,.pdf" 
+                                    onChange={(e) => { 
+                                        if(e.target.files[0]) handleUpdateReceipt(job.id, e.target.files[0]); 
+                                        e.target.value = null; // reset so they can upload same file if needed
+                                    }} 
+                                />
+                            </label>
+                        )}
+                    </div>
                     
                     {job.notes && <div className="mt-2 bg-gray-50 px-2 py-1 rounded inline-block"><p className="text-xs text-gray-600">Instructions: <span className="italic">{job.notes}</span></p></div>}
                     

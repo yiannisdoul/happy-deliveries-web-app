@@ -193,14 +193,28 @@ export default function RequestForm({
                                 {receiptFile ? <span className="font-bold text-blue-600">{receiptFile.name}</span> : <><span className="font-semibold text-blue-600">Click to upload document</span> (PDF or Image)</>}
                             </p>
                         </div>
-                        {/* No native required tag here, ClientDash JS handles it! */}
                         <input type="file" className="hidden" accept="image/*,.pdf" onChange={handleReceiptChange} />
                     </label>
                     {formData.receiptUrl && !receiptFile && <p className="text-[10px] text-green-600 font-bold mt-1">✓ Receipt currently attached</p>}
                 </div>
 
+                {/* NEW: STRICT POLICY CHECKBOX */}
+                <label className="flex items-start mt-4 p-3 bg-red-50 border border-red-200 rounded-lg cursor-pointer hover:bg-red-100 transition shadow-sm">
+                    <input 
+                        type="checkbox" 
+                        required 
+                        checked={formData.policyAgreed || false} 
+                        onChange={e => setFormData({...formData, policyAgreed: e.target.checked})} 
+                        className="mt-1 mr-3 h-4 w-4 text-red-600 rounded focus:ring-red-500 border-red-300" 
+                    />
+                    <span className="text-[11px] sm:text-xs text-red-900 font-medium leading-tight">
+                        <strong className="block uppercase mb-0.5 tracking-wide">Warning: Wrong Delivery Penalty</strong>
+                        I understand that if the attached document is incorrect and results in the wrong items being picked up/delivered, I will be liable for a <strong>2nd full delivery fee PLUS a 25% return-to-warehouse surcharge</strong>.
+                    </span>
+                </label>
+
                 <div>
-                    <label className="text-xs text-gray-500 font-bold mb-1 block">Additional Instructions <span className="font-normal lowercase">(optional - e.g. gate codes)</span></label>
+                    <label className="text-xs text-gray-500 font-bold mb-1 block mt-2">Additional Instructions <span className="font-normal lowercase">(optional - e.g. gate codes)</span></label>
                     <textarea className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                 </div>
                 

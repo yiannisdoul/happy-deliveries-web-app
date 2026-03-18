@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../config/firebase';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { REWARD_VALUE, COMPANY_EMAIL, CLOUD_NAME, UPLOAD_PRESET } from '../utils/constants'; // IMPORTED CLOUDINARY CONSTANTS
+import { REWARD_VALUE, COMPANY_EMAIL, CLOUD_NAME, UPLOAD_PRESET } from '../utils/constants'; 
 import { useNavigate } from 'react-router-dom';
 import { checkAndPerformReset } from '../utils/resetLogic';
 import { getJobProfile, getMinutesFromMidnight, checkSlotStatus } from '../utils/timeBlocking'; 
@@ -31,7 +31,6 @@ export default function ClientDash() {
     const [monthlyCount, setMonthlyCount] = useState(0); 
     const [useRewardOnThisJob, setUseRewardOnThisJob] = useState(false); 
     
-    // NEW: File Upload State
     const [receiptFile, setReceiptFile] = useState(null);
     
     const [counteringJob, setCounteringJob] = useState(null); 
@@ -52,7 +51,8 @@ export default function ClientDash() {
         flights: 0, difficultAccess: false,
         calculatedBasePrice: 0, requiredTrips: 1,
         isQuoteRequired: false, accessCost: 0,
-        receiptUrl: null // NEW: Added to state
+        receiptUrl: null,
+        policyAgreed: false // NEW: Track the warning checkbox
     });
 
     const currentJobProfile = getJobProfile(
@@ -195,7 +195,7 @@ export default function ClientDash() {
 
     const handleEdit = (job) => {
         setEditingId(job.id);
-        setReceiptFile(null); // Clear pending upload on edit click
+        setReceiptFile(null); 
         setFormData({
             ...job, paymentMethod: job.paymentMethod || 'cash', acceptSurcharge: job.totalAmount > job.amount, 
             poType: job.purchaseOrder === 'N/A' ? 'na' : 'entry', purchaseOrder: job.purchaseOrder === 'N/A' ? '' : job.purchaseOrder,
@@ -203,7 +203,8 @@ export default function ClientDash() {
             flights: job.flights || 0, difficultAccess: job.difficultAccess || false,
             calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0,
             notes: job.notes || '',
-            receiptUrl: job.receiptUrl || null
+            receiptUrl: job.receiptUrl || null,
+            policyAgreed: true // Pre-check on edit
         }); 
         
         setTimeout(() => {
@@ -223,8 +224,42 @@ export default function ClientDash() {
             pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '', notes: '', paymentMethod: 'cash', 
             date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
             weightBracket: 1, actualWeightLabel: '< 1.25', actualDistance: 50, flights: 0, difficultAccess: false, calculatedBasePrice: 0, requiredTrips: 1, isQuoteRequired: false, accessCost: 0,
-            receiptUrl: null
+            receiptUrl: null, policyAgreed: false
         });
+    };
+
+    // NEW: Handle mid-flight document swapping without opening full edit mode
+    const handleUpdateReceipt = async (jobId, file) => {
+        if (!file) return;
+        if (!window.confirm("Are you sure you want to update the receipt for this job? The Owner will be notified of the change.")) return;
+        
+        try {
+            const uploadData = new FormData();
+            uploadData.append('file', file);
+            uploadData.append('upload_preset', UPLOAD_PRESET);
+            
+            const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, {
+                method: 'POST',
+                body: uploadData
+            });
+            
+            if (!res.ok) throw new Error("Failed to upload the new document.");
+            
+            const data = await res.json();
+            const newReceiptUrl = data.secure_url;
+            
+            // Push to DB and alert owner via yellow border UI flag
+            await updateDoc(doc(db, "requests", jobId), {
+                receiptUrl: newReceiptUrl,
+                updatedAt: serverTimestamp(),
+                hasUnreadEdit: true 
+            });
+            
+            alert("Document successfully updated!");
+        } catch (error) {
+            console.error(error);
+            alert("Error updating document.");
+        }
     };
 
     const handleCancelJob = async (job) => {
@@ -340,14 +375,12 @@ export default function ClientDash() {
         if (isLate && !formData.acceptSurcharge) return alert("You must accept the surcharge.");
         if (formData.poType === 'entry' && !formData.purchaseOrder.trim()) return alert("Enter PO or select N/A.");
         
-        // NEW: Enforce Receipt requirement
         if (!editingId && !receiptFile && !formData.receiptUrl) {
             return alert("Please attach a receipt or purchase order document before submitting.");
         }
 
         setLoading(true);
         try {
-            // NEW: Upload to Cloudinary Logic
             let finalReceiptUrl = formData.receiptUrl || null;
 
             if (receiptFile) {
@@ -376,11 +409,12 @@ export default function ClientDash() {
                 distanceLabel: distLabel, weightLabel: weightLabel,
                 clientEmail: auth.currentUser.email, clientId: auth.currentUser.uid, 
                 status: 'pending', updatedAt: serverTimestamp(), rewardUsed: useRewardOnThisJob && discount > 0,
-                receiptUrl: finalReceiptUrl // Save link to DB
+                receiptUrl: finalReceiptUrl 
             };
             
             delete payload.poType;
             delete payload.actualWeightLabel;
+            delete payload.policyAgreed; // Don't need to save the local form state to DB
 
             if (!editingId) {
                 payload.createdAt = serverTimestamp();
@@ -394,12 +428,12 @@ export default function ClientDash() {
                 alert("Request Updated!"); setEditingId(null);
             }
             
-            setReceiptFile(null); // Clear file upload state
+            setReceiptFile(null); 
             setFormData({ 
                 pickupName: '', pickupPhone: '', from: '', dropoffName: '', dropoffPhone: '', to: '', notes: '', paymentMethod: 'cash', 
                 date: getTomorrowDate(), hour: '10', minute: '00', ampm: 'AM', acceptSurcharge: false, purchaseOrder: '', poType: 'entry',
                 weightBracket: 1, actualWeightLabel: '< 1.25', actualDistance: 50, flights: 0, difficultAccess: false, calculatedBasePrice: 0, requiredTrips: 1, isQuoteRequired: false, accessCost: 0,
-                receiptUrl: null
+                receiptUrl: null, policyAgreed: false
             });
         } catch (e) { console.error(e); alert("Error submitting: " + e.message); } finally { setLoading(false); }
     };
@@ -455,7 +489,7 @@ export default function ClientDash() {
 
                     <div className="space-y-4">
                         {filteredJobs.map((job) => (
-                            <ClientJobCard key={job.id} job={job} openCounterModal={openCounterModal} handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob} handleEdit={handleEdit} handleCancelJob={handleCancelJob} />
+                            <ClientJobCard key={job.id} job={job} openCounterModal={openCounterModal} handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob} handleEdit={handleEdit} handleCancelJob={handleCancelJob} handleUpdateReceipt={handleUpdateReceipt} />
                         ))}
                     </div>
                 </div>
