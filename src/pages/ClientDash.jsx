@@ -52,7 +52,7 @@ export default function ClientDash() {
         calculatedBasePrice: 0, requiredTrips: 1,
         isQuoteRequired: false, accessCost: 0,
         receiptUrl: null,
-        policyAgreed: false // NEW: Track the warning checkbox
+        policyAgreed: false
     });
 
     const currentJobProfile = getJobProfile(
@@ -204,7 +204,7 @@ export default function ClientDash() {
             calculatedBasePrice: job.amount || 0, accessCost: job.accessCost || 0,
             notes: job.notes || '',
             receiptUrl: job.receiptUrl || null,
-            policyAgreed: true // Pre-check on edit
+            policyAgreed: true 
         }); 
         
         setTimeout(() => {
@@ -228,10 +228,14 @@ export default function ClientDash() {
         });
     };
 
-    // NEW: Handle mid-flight document swapping without opening full edit mode
-    const handleUpdateReceipt = async (jobId, file) => {
+    // RESTORED: Mid-flight document swapping WITH Audit Trail AND Strict Penalty Warning
+    const handleUpdateReceipt = async (job, file) => {
         if (!file) return;
-        if (!window.confirm("Are you sure you want to update the receipt for this job? The Owner will be notified of the change.")) return;
+        
+        // Strict legal warning baked right into the swap!
+        const warningMsg = "WARNING: If this new document is incorrect and results in the wrong items being picked up/delivered, you will be liable for a 2nd full delivery fee PLUS a 25% return-to-warehouse surcharge.\n\nDo you accept this and wish to update the document?";
+        
+        if (!window.confirm(warningMsg)) return;
         
         try {
             const uploadData = new FormData();
@@ -248,11 +252,20 @@ export default function ClientDash() {
             const data = await res.json();
             const newReceiptUrl = data.secure_url;
             
-            // Push to DB and alert owner via yellow border UI flag
-            await updateDoc(doc(db, "requests", jobId), {
+            const previousReceipts = job.previousReceipts || [];
+            if (job.receiptUrl) {
+                previousReceipts.push({
+                    url: job.receiptUrl,
+                    replacedAt: new Date().toISOString()
+                });
+            }
+            
+            await updateDoc(doc(db, "requests", job.id), {
                 receiptUrl: newReceiptUrl,
+                previousReceipts: previousReceipts,
                 updatedAt: serverTimestamp(),
-                hasUnreadEdit: true 
+                hasUnreadEdit: true,
+                documentUpdated: true 
             });
             
             alert("Document successfully updated!");
@@ -382,6 +395,10 @@ export default function ClientDash() {
         setLoading(true);
         try {
             let finalReceiptUrl = formData.receiptUrl || null;
+            let documentUpdatedInFullEdit = false;
+            let previousReceiptsToSave = [];
+            
+            const existingJob = editingId ? jobs.find(j => j.id === editingId) : null;
 
             if (receiptFile) {
                 const uploadData = new FormData();
@@ -397,6 +414,15 @@ export default function ClientDash() {
                 
                 const data = await res.json();
                 finalReceiptUrl = data.secure_url;
+
+                if (editingId && existingJob && existingJob.receiptUrl) {
+                    previousReceiptsToSave = existingJob.previousReceipts ? [...existingJob.previousReceipts] : [];
+                    previousReceiptsToSave.push({
+                        url: existingJob.receiptUrl,
+                        replacedAt: new Date().toISOString()
+                    });
+                    documentUpdatedInFullEdit = true;
+                }
             }
 
             const finalPO = formData.poType === 'na' ? "N/A" : formData.purchaseOrder;
@@ -408,22 +434,31 @@ export default function ClientDash() {
                 amount: subtotal + discount - surcharge, surcharge: surcharge, totalAmount: total, 
                 distanceLabel: distLabel, weightLabel: weightLabel,
                 clientEmail: auth.currentUser.email, clientId: auth.currentUser.uid, 
-                status: 'pending', updatedAt: serverTimestamp(), rewardUsed: useRewardOnThisJob && discount > 0,
+                updatedAt: serverTimestamp(), rewardUsed: useRewardOnThisJob && discount > 0,
                 receiptUrl: finalReceiptUrl 
             };
             
             delete payload.poType;
             delete payload.actualWeightLabel;
-            delete payload.policyAgreed; // Don't need to save the local form state to DB
+            delete payload.policyAgreed; 
 
             if (!editingId) {
+                payload.status = 'pending';
                 payload.createdAt = serverTimestamp();
                 await addDoc(collection(db, "requests"), payload);
                 sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { to_name: "Owner", to_email: COMPANY_EMAIL, subject: "New Delivery Request", message: `New Job from ${formData.pickupName} to ${formData.dropoffName} (${distLabel}, ${weightLabel}) submitted.`, status: "Pending", total_price: `$${total.toFixed(2)}`, client_email: auth.currentUser.email, job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`, link: "https://dashboard.happydeliveries.com.au/owner" });
                 alert(`Request Sent! Total: $${total.toFixed(2)}.`);
                 if (payload.rewardUsed) { await updateDoc(doc(db, "users", auth.currentUser.uid), { rewardCount: rewardCount - 1 }); setUseRewardOnThisJob(false); }
             } else {
-                await updateDoc(doc(db, "requests", editingId), { ...payload, hasUnreadEdit: true });
+                payload.status = existingJob.status;
+                payload.hasUnreadEdit = true;
+
+                if (documentUpdatedInFullEdit) {
+                    payload.previousReceipts = previousReceiptsToSave;
+                    payload.documentUpdated = true;
+                }
+
+                await updateDoc(doc(db, "requests", editingId), payload);
                 sendNotificationEmail(TEMPLATES.OWNER_REQUEST_ALERT, { to_name: "Owner", to_email: COMPANY_EMAIL, subject: "Request Updated by Client", message: `Client ${auth.currentUser.email} updated a request.`, status: "Pending", total_price: `$${total.toFixed(2)}`, client_email: auth.currentUser.email, job_time: `${formData.date} @ ${formData.hour}:${formData.minute} ${formData.ampm}`, link: "https://dashboard.happydeliveries.com.au/owner" });
                 alert("Request Updated!"); setEditingId(null);
             }

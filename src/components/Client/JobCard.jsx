@@ -16,10 +16,12 @@ const getStatusBadge = (status) => {
 
 export default function ClientJobCard({ job, openCounterModal, handleAcceptCounter, setViewProofJob, handleEdit, handleCancelJob, handleUpdateReceipt }) {
     
+    // REVERTED: Editing is strictly for pending jobs only
     const canEdit = job.status === 'pending';
     const canCounter = job.status === 'rejected' && !job.hasClientCountered;
     const canCancel = job.status === 'pending' || job.status === 'accepted';
-    // NEW: Allow document swap if it's pending or accepted
+    
+    // Quick swap is allowed for pending and accepted
     const canUpdateDoc = job.status === 'pending' || job.status === 'accepted';
 
     return (
@@ -53,7 +55,7 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                             </a>
                         )}
                         
-                        {/* NEW: Quick Swap Document Button */}
+                        {/* RESTORED: Quick Swap Document Button */}
                         {canUpdateDoc && (
                             <label className="text-xs bg-gray-50 text-gray-700 hover:bg-gray-200 px-3 py-1.5 rounded inline-flex items-center font-bold border border-gray-200 transition cursor-pointer">
                                 <UploadCloud className="h-3 w-3 mr-1 text-blue-500"/> Update Doc
@@ -62,8 +64,8 @@ export default function ClientJobCard({ job, openCounterModal, handleAcceptCount
                                     className="hidden" 
                                     accept="image/*,.pdf" 
                                     onChange={(e) => { 
-                                        if(e.target.files[0]) handleUpdateReceipt(job.id, e.target.files[0]); 
-                                        e.target.value = null; // reset so they can upload same file if needed
+                                        if(e.target.files[0]) handleUpdateReceipt(job, e.target.files[0]); 
+                                        e.target.value = null; 
                                     }} 
                                 />
                             </label>

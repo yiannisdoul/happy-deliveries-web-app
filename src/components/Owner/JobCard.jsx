@@ -22,7 +22,6 @@ const createGoogleCalendarLink = (job, clientInfo = {}) => {
     const phoneDisplay = clientInfo.phone ? `+61 ${clientInfo.phone}` : 'No Phone';
     const clientName = clientInfo.fullName || 'Unknown';
     
-    // Add access details to the calendar event if they exist
     const accessNotes = job.accessCost > 0 ? `\nACCESS FEE APPLIED: $${job.accessCost}` : '';
     
     const title = encodeURIComponent(`Delivery: ${job.from} --> ${job.to}`);
@@ -48,11 +47,13 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                 </div>
             </div>
             
+            {/* UPDATED: specific warning for document changes */}
             {job.hasUnreadEdit && (
                 <div className="bg-yellow-50 text-yellow-800 text-xs font-bold px-4 py-2 flex items-center justify-between border-b border-yellow-100">
                     <span className="flex items-center">
                         <AlertCircle className="h-3 w-3 mr-1" /> 
-                        {job.hasClientCountered ? 'CLIENT SUBMITTED COUNTER-OFFER' : 'CLIENT EDITED REQUEST'}
+                        {job.documentUpdated ? 'CLIENT UPDATED RECEIPT DOCUMENT' : 
+                         job.hasClientCountered ? 'CLIENT SUBMITTED COUNTER-OFFER' : 'CLIENT EDITED REQUEST'}
                     </span>
                     <button onClick={() => handleMarkAsReviewed(job.id)} className="text-blue-600 hover:text-blue-800 underline transition">Mark as Reviewed</button>
                 </div>
@@ -104,7 +105,6 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                         </div>
                     </div>
                     
-                    {/* DISPLAY DISTANCE & WEIGHT */}
                     {job.distanceLabel && job.weightLabel && (
                         <div className="flex gap-3 text-xs font-bold text-slate-700 bg-slate-100 p-2 rounded justify-center sm:justify-start">
                             <span className="flex items-center"><Truck className="h-3 w-3 mr-1 text-slate-500"/> {job.distanceLabel}</span>
@@ -112,7 +112,6 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                         </div>
                     )}
 
-                    {/* NEW: DISPLAY ACCESS SURCHARGES (Stairs / Difficult Access) */}
                     {job.accessCost > 0 && (
                         <div className="mt-1 flex gap-3 text-xs font-bold text-orange-800 bg-orange-100 border border-orange-200 p-2 rounded justify-center sm:justify-start">
                             <span className="flex items-center"><AlertTriangle className="h-3 w-3 mr-1 text-orange-600"/> Includes Access/Stairs Surcharge (+${job.accessCost})</span>
@@ -121,12 +120,32 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
 
                     {job.purchaseOrder && <div className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded inline-block"><strong>PO:</strong> {job.purchaseOrder}</div>}
                     
-                    {/* THE RECEIPT LINK */}
                     {job.receiptUrl && (
                         <div className="block mt-2">
                             <a href={job.receiptUrl} target="_blank" rel="noreferrer" className="text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded inline-flex items-center font-bold border border-indigo-200 transition">
                                 <FileText className="h-3 w-3 mr-1"/> View Receipt / Document
                             </a>
+                        </div>
+                    )}
+
+                    {/* NEW: Audit Trail - Display previous versions of the document if they tried to swap it */}
+                    {job.previousReceipts && job.previousReceipts.length > 0 && (
+                        <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                            <p className="text-xs font-bold text-red-800 uppercase flex items-center mb-2">
+                                <AlertTriangle className="h-3 w-3 mr-1"/> Document Audit History
+                            </p>
+                            <div className="space-y-1.5">
+                                {job.previousReceipts.map((oldDoc, index) => (
+                                    <div key={index} className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-xs border-b border-red-100 pb-1.5 last:border-0 last:pb-0">
+                                        <a href={oldDoc.url} target="_blank" rel="noreferrer" className="text-red-600 hover:underline font-bold flex items-center">
+                                            <FileText className="h-3 w-3 mr-1"/> View Previous V{index + 1}
+                                        </a>
+                                        <span className="text-red-400 italic mt-0.5 sm:mt-0">
+                                            Replaced: {new Date(oldDoc.replacedAt).toLocaleString()}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
 
@@ -143,7 +162,6 @@ export default function JobCard({ job, clientInfo = {}, handleStatus, openReject
                     {job.rewardUsed && <div className="mt-3 bg-green-50 text-green-800 text-xs px-2 py-1 rounded inline-block font-bold flex items-center"><Star className="h-3 w-3 mr-1 fill-green-800 text-green-800"/> REWARD CLAIMED</div>}
                 </div>
                 
-                {/* MODIFIED: SHOW CALENDAR ON PENDING AND ACCEPTED */}
                 {(job.status === 'accepted' || job.status === 'pending') && job.date && (
                     <div className="mt-4 pt-4 border-t border-gray-100">
                         <a href={createGoogleCalendarLink(job, clientInfo)} target="_blank" rel="noreferrer" className="block w-full text-center py-3 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-bold text-sm transition-colors flex items-center justify-center">
