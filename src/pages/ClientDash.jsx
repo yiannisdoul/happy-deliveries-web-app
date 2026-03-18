@@ -22,6 +22,7 @@ export default function ClientDash() {
     const navigate = useNavigate();
     const [jobs, setJobs] = useState([]);
     const [filter, setFilter] = useState('all'); 
+    const [currentPage, setCurrentPage] = useState(1); // NEW: Pagination state
     const [editingId, setEditingId] = useState(null); 
     const [loading, setLoading] = useState(false);
     const [viewProofJob, setViewProofJob] = useState(null);
@@ -150,7 +151,11 @@ export default function ClientDash() {
         }
     }, [busyIntervals, currentJobProfile, formData.date, formData.hour, formData.minute, formData.ampm]); 
 
+    // NEW: Pagination Logic
     const filteredJobs = jobs.filter(job => { if (filter === 'all') return true; return job.status === filter; });
+    const ITEMS_PER_PAGE = 8;
+    const totalPages = Math.ceil(filteredJobs.length / ITEMS_PER_PAGE);
+    const paginatedJobs = filteredJobs.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
     const getTimeValidation = () => {
         let hour24 = parseInt(formData.hour);
@@ -228,11 +233,9 @@ export default function ClientDash() {
         });
     };
 
-    // RESTORED: Mid-flight document swapping WITH Audit Trail AND Strict Penalty Warning
     const handleUpdateReceipt = async (job, file) => {
         if (!file) return;
         
-        // Strict legal warning baked right into the swap!
         const warningMsg = "WARNING: If this new document is incorrect and results in the wrong items being picked up/delivered, you will be liable for a 2nd full delivery fee PLUS a 25% return-to-warehouse surcharge.\n\nDo you accept this and wish to update the document?";
         
         if (!window.confirm(warningMsg)) return;
@@ -515,7 +518,7 @@ export default function ClientDash() {
                         <h3 className="text-xl font-bold text-gray-900 mb-2 sm:mb-0">My Requests ({jobs.length})</h3>
                         <div className="flex flex-wrap justify-center sm:justify-end bg-gray-100 p-1 rounded-lg space-x-1" id="jobs-filter-target">
                             {['all', 'pending', 'accepted', 'delivered', 'rejected', 'cancelled'].map(status => (
-                                <button key={status} onClick={() => setFilter(status)} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
+                                <button key={status} onClick={() => { setFilter(status); setCurrentPage(1); }} className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filter === status ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{status}</button>
                             ))}
                         </div>
                     </div>
@@ -523,10 +526,33 @@ export default function ClientDash() {
                     {filteredJobs.length === 0 && <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200"><p className="text-gray-500">No {filter !== 'all' ? filter : ''} requests found.</p></div>}
 
                     <div className="space-y-4">
-                        {filteredJobs.map((job) => (
+                        {paginatedJobs.map((job) => (
                             <ClientJobCard key={job.id} job={job} openCounterModal={openCounterModal} handleAcceptCounter={handleAcceptCounter} setViewProofJob={setViewProofJob} handleEdit={handleEdit} handleCancelJob={handleCancelJob} handleUpdateReceipt={handleUpdateReceipt} />
                         ))}
                     </div>
+
+                    {/* NEW: Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-center items-center mt-6 gap-3 pb-4">
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className="px-4 py-2 rounded-lg text-xs font-bold bg-white border border-gray-300 text-gray-700 disabled:opacity-50 disabled:bg-gray-50 disabled:cursor-not-allowed hover:bg-gray-50 transition shadow-sm"
+                            >
+                                &larr; Previous
+                            </button>
+                            <span className="text-xs font-bold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-md">
+                                Page {currentPage} of {totalPages}
+                            </span>
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                                className="px-4 py-2 rounded-lg text-xs font-bold bg-white border border-gray-300 text-gray-700 disabled:opacity-50 disabled:bg-gray-50 disabled:cursor-not-allowed hover:bg-gray-50 transition shadow-sm"
+                            >
+                                Next &rarr;
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
